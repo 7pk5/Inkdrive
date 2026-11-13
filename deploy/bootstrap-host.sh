@@ -9,8 +9,18 @@ export DEBIAN_FRONTEND=noninteractive
 echo "==> system updates and tools"
 apt-get update -y
 apt-get upgrade -y
-apt-get install -y ca-certificates curl git ufw fail2ban unattended-upgrades docker.io docker-compose-v2 age openssl iptables-persistent
+# Oracle's Ubuntu image ships iptables-persistent, which refuses to coexist with ufw. We use ufw, so remove it first.
+apt-get purge -y iptables-persistent netfilter-persistent || true
+apt-get install -y ca-certificates curl git ufw fail2ban unattended-upgrades docker.io docker-compose-v2 age openssl
 systemctl enable --now docker fail2ban
+
+echo "==> swap (small servers run out of memory while building Docker images)"
+mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+if [ "$mem_mb" -lt 3000 ] && ! swapon --show | grep -q .; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "added 2 GB of swap (this server has ${mem_mb} MB of memory)"
+fi
 
 echo "==> automatic security updates"
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
@@ -43,11 +53,11 @@ ufw allow 443/udp
 ufw --force enable
 
 # Oracle's Ubuntu images ship an iptables rule that REJECTs everything not explicitly allowed, ahead of ufw's rules.
-# With ufw now in charge, remove that rule so 80/443 actually reach Caddy.
+# With ufw now in charge, remove that rule so 80/443 actually reach Caddy. (ufw keeps its own rules across reboots,
+# and Oracle's saved rules are no longer restored now that iptables-persistent is gone.)
 if iptables -S INPUT | grep -q -- "-j REJECT --reject-with icmp-host-prohibited"; then
   echo "==> removing Oracle's default REJECT rule (ufw handles the policy now)"
   iptables -D INPUT -j REJECT --reject-with icmp-host-prohibited || true
-  netfilter-persistent save || true
 fi
 
 echo
