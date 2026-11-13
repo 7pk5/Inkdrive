@@ -25,6 +25,7 @@ import {
 import type { Config } from "./config.js";
 import type { DataCrypto } from "./crypto.js";
 import type { Db } from "./db.js";
+import type { Mailer } from "./mailer.js";
 import { HttpError, IdParams, parse } from "./http.js";
 import { accessFor, bestAccess, can, type Action, type AuthUser } from "./permissions.js";
 
@@ -113,9 +114,10 @@ export interface FileDeps {
   db: Db;
   cfg: Config;
   crypt: DataCrypto;
+  mailer?: Mailer | null;
 }
 
-export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt }: FileDeps) {
+export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, mailer }: FileDeps) {
   /** Each stored blob is bound to its file and revision, so it cannot be moved to another row. */
   const aadFor = (fileId: string, revision: number) => `${fileId}:${revision}`;
   const sealScene = (gz: Buffer, fileId: string, revision: number) => crypt.seal(gz, aadFor(fileId, revision));
@@ -596,13 +598,30 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt }: Fil
     const body = parse(AddShareBody, req.body);
     const email = body.email.toLowerCase();
     if (email === req.user!.email.toLowerCase()) throw new HttpError(400, "cannot_share_with_self");
+    const before = await db.query<{ role: string }>(`SELECT role FROM shares WHERE file_id = $1 AND invited_email = $2`, [f.id, email]);
     const rows = await db.query<{ id: string }>(
       `INSERT INTO shares (file_id, invited_email, role, created_by) VALUES ($1, $2, $3, $4)
        ON CONFLICT (file_id, invited_email) DO UPDATE SET role = EXCLUDED.role RETURNING id`,
       [f.id, email, body.role, req.user!.id],
     );
     await audit(req.user!.id, "share.add", `${f.id}:${email}:${body.role}`);
-    return reply.status(201).send({ id: rows[0]!.id, email, role: body.role });
+    // Email only when something changed for them, never on a repeated identical add; capped per user per day.
+    let emailed = false;
+    if (mailer && body.notify !== false && before[0]?.role !== body.role) {
+      const sent = await db.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM audit_log WHERE user_id = $1 AND action = 'invite.email' AND at > now() - interval '1 day'`,
+        [req.user!.id],
+      );
+      if (Number(sent[0]?.n ?? 0) < cfg.INVITES_PER_DAY) {
+        const meta = await db.query<{ name: string; kind: "file" | "folder" }>(`SELECT name, kind FROM files WHERE id = $1`, [f.id]);
+        await audit(req.user!.id, "invite.email", `${f.id}:${email}`);
+        emailed = true;
+        void mailer
+          .sendInvite({ to: email, fromName: req.user!.name, fileName: meta[0]?.name ?? "", kind: meta[0]?.kind ?? "file", role: body.role })
+          .catch((e) => api.log.error({ err: String(e) }, "invite email failed"));
+      }
+    }
+    return reply.status(201).send({ id: rows[0]!.id, email, role: body.role, emailed });
   });
 
   api.patch("/v1/files/:id/shares/:shareId", async (req) => {

@@ -1,5 +1,6 @@
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { makeMailer } from "./mailer.js";
 import { migrate, openMemory, openPg } from "./db.js";
 import { runMaintenance } from "./maintenance.js";
 
@@ -10,7 +11,7 @@ if (!cfg.DATABASE_URL) console.warn("DATABASE_URL not set: using in-memory datab
 const applied = await migrate(db);
 if (applied.length) console.log("applied migrations:", applied.join(", "));
 
-const app = await buildApp(cfg, db);
+const app = await buildApp(cfg, db, makeMailer(cfg));
 await app.listen({ port: cfg.PORT, host: cfg.HOST });
 
 // Housekeeping at start and every 6 hours. A failure here must never take the API down.

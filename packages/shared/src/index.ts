@@ -131,7 +131,7 @@ export const ShareEntry = z.object({
 });
 export type ShareEntry = z.infer<typeof ShareEntry>;
 
-export const AddShareBody = z.object({ email: z.string().email(), role: Role });
+export const AddShareBody = z.object({ email: z.string().email(), role: Role, notify: z.boolean().optional() });
 export type AddShareBody = z.infer<typeof AddShareBody>;
 
 export const UpdateShareBody = z.object({ role: Role });

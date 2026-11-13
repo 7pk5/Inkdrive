@@ -257,3 +257,49 @@ describe("anyone with the link", () => {
     expect(r.body).toContain("Open in Inkdrive");
   });
 });
+
+describe("invite emails", () => {
+  it("emails once per change, respects notify:false and the daily cap, and never fails the share", async () => {
+    const sent: { to: string; role: string; fileName: string }[] = [];
+    const mailer = { sendInvite: async (i: any) => void sent.push(i) };
+    const db2 = await openMemory();
+    await migrate(db2);
+    const app2 = await buildApp(loadConfig({ JWT_SECRET: "y".repeat(40), DEV_AUTH: "1", INVITES_PER_DAY: "2" }), db2, mailer);
+    const lg = async (email: string) => {
+      const r = await app2.inject({ method: "POST", url: "/v1/auth/dev", payload: { email, name: "Owner <b>x</b>" } });
+      return r.json().accessToken as string;
+    };
+    const t = await lg("owner@x.test");
+    const mk = (name: string) => app2.inject({ method: "POST", url: "/v1/files", headers: auth(t), payload: { name, scene: scene() } }).then((r) => r.json().id as string);
+    const share = (id: string, payload: object) => app2.inject({ method: "POST", url: `/v1/files/${id}/shares`, headers: auth(t), payload });
+    const id = await mk("Plan");
+    const r1 = await share(id, { email: "A@x.test", role: "viewer" });
+    expect(r1.json().emailed).toBe(true);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ to: "a@x.test", role: "viewer", fileName: "Plan" });
+    expect((await share(id, { email: "a@x.test", role: "viewer" })).json().emailed).toBe(false); // identical repeat
+    expect((await share(id, { email: "a@x.test", role: "editor" })).json().emailed).toBe(true); // role changed
+    expect((await share(id, { email: "b@x.test", role: "viewer", notify: false })).json().emailed).toBe(false);
+    const capped = await share(id, { email: "c@x.test", role: "viewer" }); // 3rd email today, cap is 2
+    expect(capped.statusCode).toBe(201);
+    expect(capped.json().emailed).toBe(false);
+    await app2.close();
+  });
+
+  it("escapes names and survives a failing mailer", async () => {
+    const { renderInvite } = await import("../src/mailer.js");
+    const m = renderInvite({ to: "a@x.test", fromName: "<img src=x onerror=1>\nBcc: z", fileName: "<script>", kind: "file", role: "editor" }, "");
+    expect(m.html).not.toContain("<script>");
+    expect(m.html).not.toContain("<img");
+    expect(m.subject).not.toMatch(/[\r\n]/);
+    const db2 = await openMemory();
+    await migrate(db2);
+    const app2 = await buildApp(loadConfig({ JWT_SECRET: "y".repeat(40), DEV_AUTH: "1" }), db2, { sendInvite: async () => Promise.reject(new Error("boom")) });
+    const t = (await app2.inject({ method: "POST", url: "/v1/auth/dev", payload: { email: "o@x.test", name: "o" } })).json().accessToken as string;
+    const id = (await app2.inject({ method: "POST", url: "/v1/files", headers: auth(t), payload: { name: "F", scene: scene() } })).json().id;
+    const r = await app2.inject({ method: "POST", url: `/v1/files/${id}/shares`, headers: auth(t), payload: { email: "z@x.test", role: "viewer" } });
+    expect(r.statusCode).toBe(201);
+    await app2.close();
+  });
+});

@@ -138,6 +138,7 @@ export function ShareDialog({ file, onClose }: { file: FileMeta; onClose: () => 
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [note, setNote] = useState("");
   const isFolder = file.kind === "folder";
 
   const load = useCallback(async () => {
@@ -161,7 +162,12 @@ export function ShareDialog({ file, onClose }: { file: FileMeta; onClose: () => 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    await guarded(() => api("POST", `/v1/files/${file.id}/shares`, { email: email.trim(), role }));
+    setNote("");
+    await guarded(async () => {
+      const r = await api<{ emailed?: boolean }>("POST", `/v1/files/${file.id}/shares`, { email: email.trim(), role });
+      if (r.status === 201) setNote(r.body?.emailed ? "Added. We emailed them an invite." : "Added. Tell them to sign in to Inkdrive with this email.");
+      return r;
+    });
     setEmail("");
     setBusy(false);
   };
@@ -193,6 +199,7 @@ export function ShareDialog({ file, onClose }: { file: FileMeta; onClose: () => 
         <button className="btn primary" style={{ minHeight: 40 }} disabled={busy}>Add</button>
       </form>
       {err && <div className="error" role="alert">{err}</div>}
+      {note && !err && <div className="meta" role="status">{note}</div>}
 
       <div>
         <div className="meta" style={{ fontWeight: 600, marginBottom: 4 }}>People with access</div>
