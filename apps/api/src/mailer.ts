@@ -28,11 +28,27 @@ export function renderInvite(i: Invite, installUrl: string) {
     `Find "${what}" under "Shared with me".`,
   ];
   const text = `${who} gave you permission to ${can} the ${i.kind} "${what}" on Inkdrive.\n\n${steps.map((s, n) => `${n + 1}. ${s}`).join("\n")}\n\nYou received this because someone entered your email address. If you don't know them, ignore this message; nothing happens unless you sign in.`;
-  const html = `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;color:#2a2a28;line-height:1.5">
-<h2 style="font-weight:600">${esc(who)} shared a ${i.kind} with you</h2>
-<p><b>${esc(what)}</b><br>You can <b>${can}</b> it.</p>
-<ol>${steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-<p style="color:#777;font-size:13px">You received this because someone entered your email address. If you don't know them, ignore this message; nothing happens unless you sign in.</p></div>`;
+  const cta = installUrl || "https://excalidraw.com";
+  const ctaLabel = installUrl ? "Get the Inkdrive extension" : "Open excalidraw.com";
+  const font = `-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif`;
+  const serif = `Georgia,'Times New Roman',serif`;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;background:#f5f4ee;padding:32px 16px;font-family:${font};color:#29261b">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
+<tr><td style="padding:0 4px 16px;font-family:${serif};font-size:22px;color:#29261b"><span style="color:#d97757">&#9998;</span>&nbsp;Inkdrive</td></tr>
+<tr><td style="background:#ffffff;border:1px solid #e6e2d6;border-radius:16px;padding:32px 28px">
+<h1 style="margin:0 0 8px;font-family:${serif};font-weight:400;font-size:26px;line-height:1.25;color:#29261b">${esc(who)} shared a ${i.kind} with you</h1>
+<p style="margin:0 0 20px;color:#6b665a;font-size:15px">You can ${can} it.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#faf9f5;border:1px solid #e6e2d6;border-radius:12px"><tr>
+<td style="padding:14px 16px;font-size:16px;font-weight:600;color:#29261b">${esc(what)}</td>
+<td align="right" style="padding:14px 16px;white-space:nowrap"><span style="background:#f3dfd5;color:#8a3f20;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600">${i.role === "editor" ? "Editor" : "Viewer"}</span></td></tr></table>
+<p style="margin:24px 0 8px;font-weight:600;font-size:14px">How to open it</p>
+<ol style="margin:0 0 24px;padding-left:20px;color:#3d3a2f;font-size:15px;line-height:1.6">${steps.map((s) => `<li style="margin-bottom:6px">${esc(s)}</li>`).join("")}</ol>
+<a href="${esc(cta)}" style="display:inline-block;background:#d97757;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:10px">${ctaLabel}</a>
+</td></tr>
+<tr><td style="padding:16px 8px 0;color:#8a857a;font-size:12px;line-height:1.5">You received this because someone entered your email address. If you don't know them, ignore this message: nothing happens unless you sign in.</td></tr>
+</table></td></tr></table></body></html>`;
   return { subject, text, html };
 }
 
