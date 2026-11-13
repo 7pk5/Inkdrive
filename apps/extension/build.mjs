@@ -24,8 +24,17 @@ const brand = JSON.parse(await readFile("../../brand/brand.json", "utf8"));
 // The share-link landing page lives on our API origin, so its content script is added here.
 manifest.content_scripts.push({ matches: [`${new URL(API_URL).origin}/s/*`], js: ["linkpage.js"], run_at: "document_idle" });
 manifest.name = brand.store_name;
-manifest.description = brand.tagline;
-manifest.action.default_title = brand.name;
+// A pinned public key (npm run pin-id) gives the extension the same id on every machine and build, which Google sign-in
+// and the server's CORS setting depend on. It is applied to builds for a real server. Local dev builds keep their own
+// path-based id (so your loaded dev copy keeps working) unless you ask: PIN_ID=1 npm run build:ext
+const isLocalApi = ["localhost", "127.0.0.1", "[::1]"].includes(apiHost);
+if ((!isLocalApi || process.env.PIN_ID === "1") && process.env.NO_PIN !== "1") {
+  try {
+    manifest.key = (await readFile(".extension-key.pub", "utf8")).trim();
+  } catch {
+    if (!isLocalApi) console.warn("WARNING: building for a real server without a pinned extension id. Run `npm run pin-id` first, or sign-in and CORS will break when the id changes.");
+  }
+}
 await cp("icons", "dist/icons", { recursive: true });
 await cp("assets", "dist/assets", { recursive: true });
 await writeFile("dist/manifest.json", JSON.stringify(manifest, null, 2));

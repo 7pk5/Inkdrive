@@ -2,6 +2,8 @@
 
 <img src="brand/logo-wordmark.svg" alt="Inkdrive" height="64">
 
+**New here? Start with [docs/START-HERE.md](docs/START-HERE.md)**: install, Google sign-in, server, and the Chrome Web Store, step by step.
+
 The product name lives in one file, [brand/brand.json](brand/brand.json); icons are generated from
 [brand/logo-icon.svg](brand/logo-icon.svg) with `npm run icons --workspace @ecd/extension`.
 
@@ -98,19 +100,11 @@ to test sharing. Never load a `DEV_LOGIN` build as your everyday extension.
 
 ## Deploy to Oracle Cloud Always Free
 
-1. Create an **Ampere A1** VM (2 OCPU / 12 GB is plenty), Ubuntu 22.04. If the region is out of capacity, retry later or use another region.
-   Upgrade the account to Pay-As-You-Go (stays $0 inside Always Free limits) so idle free instances are not reclaimed.
-2. VCN security list: allow inbound TCP 80 and 443 only. Install Docker.
-3. Point a domain (a free one works) at the VM's public IP; Caddy gets the HTTPS certificate automatically.
-4. On the VM: clone the repo, then
-   ```bash
-   cd deploy && cp .env.example .env     # fill in every value
-   docker compose up -d --build
-   curl https://$API_DOMAIN/health
-   ```
-5. Rebuild the extension with `API_URL=https://$API_DOMAIN npm run build:ext` and reload it in Chrome.
-6. Backups: the `backup` service writes a nightly dump to `deploy/backups/`. Copy that folder to an OCI Object Storage
-   bucket (Always Free: 20 GB) with a cron job and `oci os object bulk-upload`, and do a restore test monthly.
+Step-by-step, hardened setup: **[deploy/RUNBOOK.md](deploy/RUNBOOK.md)**. In short: pin the extension id (`npm run pin-id`), set up Google
+sign-in, create the Ampere VM and DNS record, then on the server run `deploy/bootstrap-host.sh` (key-only SSH, firewall, fail2ban,
+automatic security updates, Docker), `deploy/gen-secrets.sh` (random secrets into a mode-600 `.env`) and `docker compose up -d --build`.
+The stack keeps the database off the internet, runs the API and proxy read-only without extra privileges, and writes nightly backups
+that are encrypted with a key that never lives on the server.
 
 ## Tags
 

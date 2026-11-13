@@ -12,9 +12,13 @@
     "dev:api": "npm run dev --workspace @ecd/api",
     "build:ext": "npm run build --workspace @ecd/extension",
     "build:api": "npm run build --workspace @ecd/api",
-    "check": "npm run typecheck && npm test && npm run build:api && npm run build:ext && npm run verify --workspace @ecd/extension"
+    "check": "npm run typecheck && npm test && npm run check:deploy && npm run build:api && npm run build:ext && npm run verify --workspace @ecd/extension",
+    "check:deploy": "node deploy/check-deploy.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.1"
   }
 }

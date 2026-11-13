@@ -1,5 +1,14 @@
-# Production stack for the Oracle Always Free Ampere VM.
-#   cp .env.example .env   (fill it in)   then:   docker compose up -d --build
+# Production stack for one small VM (Oracle Always Free Ampere ARM works well).
+#   ./gen-secrets.sh        (once: writes .env with random secrets, mode 600)
+#   docker compose up -d --build
+#
+# Hardening in this file:
+#  - the database lives on an INTERNAL network: no route to the internet and nothing published to the host
+#  - only Caddy publishes ports (80/443); the API is reachable only through it
+#  - every container: no-new-privileges, dropped capabilities, resource limits; API and Caddy run read-only
+#  - secrets come from .env (never baked into images), and the API refuses to start without them
+name: inkdrive
+
 services:
   db:
     image: postgres:16-alpine
@@ -7,14 +16,18 @@ services:
     environment:
       POSTGRES_DB: ecd
       POSTGRES_USER: ecd
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./gen-secrets.sh first}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    pids_limit: 200
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ecd -d ecd"]
       interval: 10s
-      retries: 5
-    # No "ports:" — the database is reachable only from the api container.
+      timeout: 5s
+      retries: 6
 
   api:
     build:
@@ -27,14 +40,21 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://ecd:${POSTGRES_PASSWORD}@db:5432/ecd
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (32+ chars)}
-      DATA_KEY: ${DATA_KEY:?set DATA_KEY (openssl rand -base64 32) and back it up}
+      JWT_SECRET: ${JWT_SECRET:?run ./gen-secrets.sh first}
+      DATA_KEY: ${DATA_KEY:?run ./gen-secrets.sh first, and back DATA_KEY up}
       DATA_KEY_OLD: ${DATA_KEY_OLD:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?set GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
       ALLOWED_REDIRECT_URIS: ${ALLOWED_REDIRECT_URIS:?set ALLOWED_REDIRECT_URIS}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       DEV_AUTH: "0"
+    networks: [internal, web] # internal: the database; web: Caddy in front, Google for sign-in checks
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 768m
+    pids_limit: 200
 
   caddy:
     image: caddy:2-alpine
@@ -43,32 +63,46 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
     environment:
       API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - caddy_config:/config
+    networks: [web]
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 100
 
+  # Nightly dump, compressed and ENCRYPTED with your age public key, kept 14 days in ./backups.
+  # Only the holder of the matching private key (keep it OFF this server) can read a backup.
   backup:
-    image: postgres:16-alpine
+    build: ./backup
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?set BACKUP_AGE_RECIPIENT (an age1... public key)}
     volumes:
       - ./backups:/backups
-    # Nightly compressed dump kept for 14 days. Copy ./backups to OCI Object Storage (see README).
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        while true; do
-          pg_dump -h db -U ecd ecd | gzip > /backups/ecd-$$(date +%F).sql.gz
-          find /backups -name 'ecd-*.sql.gz' -mtime +14 -delete
-          sleep 86400
-        done
+    networks: [internal]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    mem_limit: 256m
+
+networks:
+  internal:
+    internal: true # no route to the internet
+  web: {}
 
 volumes:
   pgdata:
   caddy_data:
+  caddy_config:

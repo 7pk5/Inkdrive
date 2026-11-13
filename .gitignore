@@ -10,3 +10,7 @@ dist
 .idea
 .vscode
 *.local
+# the extension's private signing key must never be published
+.extension-key.*
+*.pem
+*.zip

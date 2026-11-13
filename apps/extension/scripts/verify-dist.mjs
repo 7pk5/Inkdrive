@@ -1,6 +1,7 @@
 // Sanity-checks the BUILT extension (dist/) the way Chrome and a reviewer would.
 // Run after a build:  npm run verify --workspace @ecd/extension   (also part of `npm run check`)
 import { access, readFile } from "node:fs/promises";
+import { extensionIdFromPublicKey } from "./extension-id.mjs";
 
 const dist = new URL("../dist/", import.meta.url);
 const problems = [];
@@ -72,9 +73,19 @@ if (!isLocal && hasDevLogin) bad(`this build points at ${apiOrigin} but contains
 // ---- no secrets baked in ----
 if (/GOOGLE_CLIENT_SECRET|client_secret\s*[:=]\s*["'][^"']{6,}/.test(code)) bad("built code mentions a client secret");
 
+// ---- the pinned id, if any (a bad key would silently change the id and break sign-in) ----
+let idNote = "extension id not pinned";
+if (manifest.key) {
+  try {
+    idNote = `extension id ${extensionIdFromPublicKey(manifest.key)} (pinned)`;
+  } catch {
+    bad("manifest.key is not a valid public key");
+  }
+}
+
 console.log(
   problems.length
     ? `verify-dist: ${problems.length} problem(s)\n - ${problems.join("\n - ")}`
-    : `verify-dist: ok (API ${apiOrigin}${isLocal ? ", local dev build" : ""}, ${manifest.permissions.length} permissions, ${manifest.content_scripts.length} content scripts)`,
+    : `verify-dist: ok (API ${apiOrigin}${isLocal ? ", local dev build" : ""}, ${idNote}, ${manifest.permissions.length} permissions, ${manifest.content_scripts.length} content scripts)`,
 );
 process.exit(problems.length ? 1 : 0);

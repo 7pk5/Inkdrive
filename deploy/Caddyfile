@@ -1,12 +1,30 @@
 {$API_DOMAIN} {
 	encode zstd gzip
+
+	# Security headers. The "?" means "only if the app did not set its own", so the share-link
+	# page keeps its own, stricter Content-Security-Policy.
 	header {
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		X-Frame-Options "DENY"
+		?Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		-Server
 	}
+
 	request_body {
 		max_size 12MB
 	}
-	reverse_proxy api:8787
+
+	# Structured access log to stdout (read it with: docker compose logs caddy)
+	log {
+		output stdout
+		format json
+	}
+
+	reverse_proxy api:8787 {
+		# the API does its own rate limiting; tell it the real client address
+		header_up X-Forwarded-For {remote_host}
+	}
 }

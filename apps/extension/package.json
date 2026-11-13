@@ -10,7 +10,9 @@
     "typecheck": "tsc -p .",
     "test": "vitest run",
     "verify": "node scripts/verify-dist.mjs",
-    "art": "node scripts/make-login-art.mjs"
+    "art": "node scripts/make-login-art.mjs",
+    "pin-id": "node scripts/pin-id.mjs",
+    "pack:store": "node scripts/pack-store.mjs"
   },
   "dependencies": {
     "@ecd/shared": "*",
