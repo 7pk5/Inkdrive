@@ -1,0 +1,20 @@
+{
+  "name": "excalidraw-cloud-drive",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:api": "npm run dev --workspace @ecd/api",
+    "build:ext": "npm run build --workspace @ecd/extension",
+    "build:api": "npm run build --workspace @ecd/api",
+    "check": "npm run typecheck && npm test && npm run build:api && npm run build:ext && npm run verify --workspace @ecd/extension"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,18 @@
+name: check
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # typecheck, all tests, build the API and the extension, then validate the built extension
+      - run: npm run check
+      # a build for a real server must never contain the dev sign-in
+      - run: API_URL=https://api.example.com npm run build:ext && npm run verify --workspace @ecd/extension
