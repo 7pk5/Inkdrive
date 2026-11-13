@@ -101,37 +101,20 @@ describe("tags", () => {
     expect((await call(u, "GET", `/v1/files?tag=${t.id}`)).body.files.map((f: { name: string }) => f.name)).toEqual(["Inside"]);
   });
 
-  it("tags are private: other people never see them, and cannot use yours", async () => {
+  it("tags are private: other people cannot see, use, change or delete yours", async () => {
     const owner = await login("tg4-owner@example.com");
-    const guest = await login("tg4-guest@example.com");
     const stranger = await login("tg4-stranger@example.com");
-    const doc = await file(owner, "Shared doc");
-    await call(owner, "POST", `/v1/files/${doc.id}/shares`, { email: guest.email, role: "viewer" });
+    const doc = await file(owner, "Doc");
     const mine = await tag(owner, "Secret plan");
-    const theirs = await tag(guest, "To read");
-
     await call(owner, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [mine.id] });
-    // a viewer can tag what was shared with them, privately
-    expect((await call(guest, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [theirs.id] })).status).toBe(200);
-
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).body.tags.map((x: { name: string }) => x.name)).toEqual(["To read"]);
     expect((await call(owner, "GET", `/v1/files/${doc.id}`)).body.tags.map((x: { name: string }) => x.name)).toEqual(["Secret plan"]);
-    expect((await call(guest, "GET", `/v1/files?view=shared`)).body.files[0].tags.map((x: { name: string }) => x.name)).toEqual(["To read"]);
-    expect((await call(guest, "GET", `/v1/files?tag=${theirs.id}`)).body.files.map((f: { name: string }) => f.name)).toEqual(["Shared doc"]);
-
-    // using someone else's tag, or filtering by it, is refused
-    expect((await call(guest, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [mine.id] })).status).toBe(400);
-    expect((await call(guest, "GET", `/v1/files?tag=${mine.id}`)).status).toBe(404);
-    expect((await call(guest, "PATCH", `/v1/tags/${mine.id}`, { name: "x" })).status).toBe(404);
-    expect((await call(guest, "DELETE", `/v1/tags/${mine.id}`)).status).toBe(404);
-    // and a stranger cannot tag what they cannot read
+    expect((await call(stranger, "GET", `/v1/files/${doc.id}`)).status).toBe(404);
+    expect((await call(stranger, "GET", `/v1/files?tag=${mine.id}`)).status).toBe(404);
+    expect((await call(stranger, "PATCH", `/v1/tags/${mine.id}`, { name: "x" })).status).toBe(404);
+    expect((await call(stranger, "DELETE", `/v1/tags/${mine.id}`)).status).toBe(404);
     const strangerTag = await tag(stranger, "Mine");
-    expect((await call(stranger, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [strangerTag.id] })).status).toBe(404);
-
-    // losing access removes the item from the tag filter
-    const share = (await call(owner, "GET", `/v1/files/${doc.id}/shares`)).body.shares[0];
-    await call(owner, "DELETE", `/v1/files/${doc.id}/shares/${share.id}`);
-    expect((await call(guest, "GET", `/v1/files?tag=${theirs.id}`)).body.files).toEqual([]);
+    expect((await call(stranger, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [strangerTag.id] })).status).toBe(404); // cannot tag what they cannot read
+    expect((await call(owner, "PUT", `/v1/files/${doc.id}/tags`, { tagIds: [strangerTag.id] })).status).toBe(400); // cannot use someone else's tag
   });
 
   it("limits tags per person", async () => {

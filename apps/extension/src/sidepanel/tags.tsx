@@ -95,7 +95,7 @@ export function TagsDialog({ item, onClose, onSaved }: { item: FileMeta; onClose
         <ColorPicker value={color} onChange={setColor} label="Colour for the new tag" />
       </form>
       {err && <div className="error" role="alert">{err}</div>}
-      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Tags are private: only you see them, even on files other people shared with you.</p>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Tags are private to you.</p>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn primary" disabled={busy} onClick={() => void save()}>Save</button>

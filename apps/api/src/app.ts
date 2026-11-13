@@ -10,8 +10,6 @@ import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import { registerFileRoutes } from "./files.js";
 import { HttpError, parse } from "./http.js";
-import type { Mailer } from "./mailer.js";
-import { registerLinkPage } from "./linkpage.js";
 import type { AuthUser } from "./permissions.js";
 
 declare module "fastify" {
@@ -20,7 +18,7 @@ declare module "fastify" {
   }
 }
 
-export async function buildApp(cfg: Config, db: Db, mailer: Mailer | null = null): Promise<FastifyInstance> {
+export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
   const crypt = new DataCrypto(cfg.dataKeys);
 
   const app = Fastify({ logger: process.env.NODE_ENV !== "test", bodyLimit: MAX_SCENE_BYTES + 1024 * 1024, trustProxy: true });
@@ -126,10 +124,8 @@ export async function buildApp(cfg: Config, db: Db, mailer: Mailer | null = null
       req.user = rows[0];
     });
 
-    registerFileRoutes(api, { db, cfg, crypt, mailer });
+    registerFileRoutes(api, { db, cfg, crypt });
   });
-
-  registerLinkPage(app);
 
   return app;
 }

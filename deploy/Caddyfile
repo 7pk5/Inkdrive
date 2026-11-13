@@ -1,8 +1,7 @@
 {$API_DOMAIN} {
 	encode zstd gzip
 
-	# Security headers. The "?" means "only if the app did not set its own", so the share-link
-	# page keeps its own, stricter Content-Security-Policy.
+	# Security headers. The "?" means "only if the app did not set its own".
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"

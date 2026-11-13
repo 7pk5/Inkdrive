@@ -38,7 +38,6 @@ export interface StoredState {
   /** Panel colour theme: follow the system (default), or force light or dark. */
   theme?: "system" | "light" | "dark";
   /** Set when a share link to a folder was opened: the panel jumps there, then clears it. */
-  navTo?: { id: string; at: number } | null;
   /** Canvas hash that must not auto-create a file (set when the user detached or trashed the open file). */
   ignoreHash?: string;
 }
@@ -53,7 +52,6 @@ export type BgRequest =
   | { type: "file:saveCurrentAsNew"; name: string }
   | { type: "file:new"; name: string; parentId?: string | null }
   /** Sent only by the content script on the share-link landing page. */
-  | { type: "link:open"; token: string }
   | { type: "file:renamed"; id: string; name: string }
   | { type: "file:saveCurrentNow" }
   | { type: "file:detach" }

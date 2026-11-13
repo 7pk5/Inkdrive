@@ -21,8 +21,6 @@ const apiOrigin = new URL(API_URL).origin + "/*";
 manifest.host_permissions = ["https://excalidraw.com/*", apiOrigin];
 // Name and description come from brand/brand.json so there is one place to rename the product.
 const brand = JSON.parse(await readFile("../../brand/brand.json", "utf8"));
-// The share-link landing page lives on our API origin, so its content script is added here.
-manifest.content_scripts.push({ matches: [`${new URL(API_URL).origin}/s/*`], js: ["linkpage.js"], run_at: "document_idle" });
 manifest.name = brand.store_name;
 // A pinned public key (npm run pin-id) gives the extension the same id on every machine and build, which Google sign-in
 // and the server's CORS setting depend on. It is applied to builds for a real server. Local dev builds keep their own
@@ -52,7 +50,7 @@ const common = {
 
 const configs = [
   // Content scripts and the page-world hook must be classic scripts (IIFE).
-  { ...common, format: "iife", entryPoints: { content: "src/content/index.ts", hook: "src/content/hook.ts", linkpage: "src/content/linkpage.ts" }, outdir: "dist" },
+  { ...common, format: "iife", entryPoints: { content: "src/content/index.ts", hook: "src/content/hook.ts" }, outdir: "dist" },
   { ...common, format: "esm", entryPoints: { background: "src/background/index.ts" }, outdir: "dist" },
   {
     ...common,

@@ -147,8 +147,8 @@ async function openFileInTab(tabId: number, id: string): Promise<string> {
   const r = await callApi<FileWithScene>("GET", `/v1/files/${id}`);
   if (r.status !== 200) throw new Error(r.status === 404 ? "File not found" : `Could not open file (${r.status})`);
   const f = r.body;
-  await setOpen({ id: f.id, name: f.name, revision: f.revision, access: f.access, userId: await currentUserId(), hash: hashElements(f.scene.elements) });
-  await setStatus(f.access === "viewer" ? "readonly" : "idle");
+  await setOpen({ id: f.id, name: f.name, revision: f.revision, access: "owner", userId: await currentUserId(), hash: hashElements(f.scene.elements) });
+  await setStatus("idle");
   await tabCall(tabId, { type: "scene:load", scene: f.scene });
   return f.name;
 }
@@ -227,34 +227,6 @@ async function handle(req: BgRequest, senderTabId?: number, senderUrl?: string):
 
     case "file:open":
       return openFileInTab(await findTab(), req.id);
-
-    case "link:open": {
-      // Only the content script on OUR share-link landing page may ask for this.
-      if (!senderUrl || !senderUrl.startsWith(`${new URL(API_URL).origin}/s/`)) throw new Error("Not allowed");
-      const r = await callApi<{ id: string; name: string; kind: "file" | "folder"; access: string }>(
-        "POST",
-        `/v1/links/${encodeURIComponent(req.token)}/redeem`,
-      );
-      if (r.status === 401) throw new Error("Sign in first: open Inkdrive on excalidraw.com, continue with Google, then use this link again.");
-      if (r.status !== 200) throw new Error("This link is not valid any more. Ask the owner for a new one.");
-      const item = r.body;
-      const existing = (await chrome.tabs.query({ url: EXCALIDRAW }))[0];
-      const tab = existing?.id
-        ? await chrome.tabs.update(existing.id, { active: true })
-        : await chrome.tabs.create({ url: "https://excalidraw.com", active: true });
-      if (tab?.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true });
-      if (item.kind === "folder") {
-        // Folders are browsed in the panel, which jumps to it.
-        await chrome.storage.local.set({ navTo: { id: item.id, at: Date.now() } });
-        return { kind: "folder", name: item.name };
-      }
-      const tabId = tab!.id!;
-      await waitForContent(tabId);
-      // Never replace a drawing that is not safely in the cloud.
-      await handle({ type: "canvas:flush" });
-      await openFileInTab(tabId, item.id);
-      return { kind: "file", name: item.name };
-    }
 
     case "file:saveCurrentAsNew": {
       const tabId = await findTab();

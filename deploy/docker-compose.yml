@@ -47,9 +47,6 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
       ALLOWED_REDIRECT_URIS: ${ALLOWED_REDIRECT_URIS:?set ALLOWED_REDIRECT_URIS}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-      BREVO_API_KEY: ${BREVO_API_KEY:-}
-      MAIL_FROM: ${MAIL_FROM:-}
-      INSTALL_URL: ${INSTALL_URL:-}
       DEV_AUTH: "0"
     networks: [internal, web] # internal: the database; web: Caddy in front, Google for sign-in checks
     read_only: true

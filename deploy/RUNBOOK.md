@@ -73,15 +73,6 @@ Load `apps/extension/dist` in Chrome (or zip it for the Web Store). The build re
 - Check the firewall from your computer: `nmap -Pn <server-ip>` shows only 22, 80, 443; port 5432 must be closed.
 - Wait for the first backup (it runs 1 minute after start): `ls -l backups/` then do the restore drill below once.
 
-## Invite emails (optional, free)
-Sharing works without this; with it, people also get an email.
-1. Create a free account at brevo.com, then **Senders & IP > Senders > Add a sender**: use your own address (for example your Gmail) and click the verification link Brevo emails you.
-2. **SMTP & API > API Keys > Generate**, copy the key.
-3. On the server, add three lines to `deploy/.env` (`nano .env`):
-   `BREVO_API_KEY=<the key>`, `MAIL_FROM=<the verified sender address>`, `INSTALL_URL=<store link, or leave empty>`
-4. `docker compose up -d` (recreates the api), then share a file with another address you own.
-Limits: 300 emails/day (Brevo free), and each user can trigger at most 30 invite emails/day. A send failure never blocks the share.
-
 ## Backups
 - A nightly dump, compressed and **encrypted with your age public key**, lands in `deploy/backups/` (kept 14 days).
 - **Copy it off the server** so one dead disk can't take everything. Free option: an Oracle Object Storage bucket (20 GB free) with `rclone`
@@ -116,7 +107,7 @@ Database migrations run automatically at start. Check `docker compose logs --tai
 - **Protected:** traffic (HTTPS only, HSTS), drawings at rest (AES-256-GCM), the database (no route to the internet, nothing published),
   containers (read-only, no extra privileges), SSH (keys only), the secrets (random, mode 600, never in git or images), backups (encrypted).
 - **Not protected, by design:** this is not end-to-end encryption. The server holds `DATA_KEY` so it can show and share drawings, so someone with
-  root on the running server can read them. File names, emails and who-shared-with-whom are stored in plain text so search and sharing work.
+  root on the running server can read them. File names and emails are stored in plain text so search works.
 - **Your responsibilities:** `DATA_KEY`, `backup-key.txt` and the extension key are never recoverable by anyone else.
 
 ## If something goes wrong

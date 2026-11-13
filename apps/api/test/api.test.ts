@@ -180,8 +180,6 @@ describe("isolation between users (every file route)", () => {
       ["GET", `/v1/files/${id}/versions`],
       ["GET", `/v1/files/${id}/versions/1`],
       ["POST", `/v1/files/${id}/versions/1/restore`],
-      ["GET", `/v1/files/${id}/shares`],
-      ["POST", `/v1/files/${id}/shares`, { email: "x@example.com", role: "viewer" }],
     ];
     for (const [method, url, payload] of calls) {
       const r = await app.inject({ method: method as "GET", url, headers: h, payload: payload as object | undefined });
@@ -194,39 +192,18 @@ describe("isolation between users (every file route)", () => {
   });
 });
 
-describe("sharing by email", () => {
-  it("gives viewers read-only and editors write access, matched on email", async () => {
-    const owner = await login("share-owner@example.com", "Pari");
-    const viewer = await login("Viewer@Example.com");
-    const editor = await login("editor@example.com");
-    const f = await createFile(owner.token, "Shared doc");
-
-    const add = (email: string, role: string) =>
-      app.inject({ method: "POST", url: `/v1/files/${f.id}/shares`, headers: auth(owner.token), payload: { email, role } });
-    expect((await add("viewer@example.com", "viewer")).statusCode).toBe(201);
-    expect((await add("editor@example.com", "editor")).statusCode).toBe(201);
-    expect((await add("share-owner@example.com", "editor")).statusCode).toBe(400);
-
-    // viewer: can read, cannot write, cannot manage
-    expect((await app.inject({ method: "GET", url: `/v1/files/${f.id}`, headers: auth(viewer.token) })).statusCode).toBe(200);
-    expect((await app.inject({ method: "PUT", url: `/v1/files/${f.id}`, headers: auth(viewer.token, { "if-match": "1" }), payload: { scene: scene() } })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: `/v1/files/${f.id}/shares`, headers: auth(viewer.token) })).statusCode).toBe(404);
-
-    // editor: can write, cannot trash or manage shares
-    const put = await app.inject({ method: "PUT", url: `/v1/files/${f.id}`, headers: auth(editor.token, { "if-match": "1" }), payload: { scene: scene(2) } });
-    expect(put.statusCode).toBe(200);
-    expect((await app.inject({ method: "DELETE", url: `/v1/files/${f.id}`, headers: auth(editor.token) })).statusCode).toBe(404);
-
-    // appears under "shared with me" with the right access level
-    const shared = (await app.inject({ method: "GET", url: "/v1/files?view=shared", headers: auth(viewer.token) })).json().files;
-    expect(shared).toHaveLength(1);
-    expect(shared[0].access).toBe("viewer");
-    expect(shared[0].ownerName).toBe("Pari");
-
-    // revoking removes access immediately
-    const list = (await app.inject({ method: "GET", url: `/v1/files/${f.id}/shares`, headers: auth(owner.token) })).json().shares;
-    const vShare = list.find((s: { email: string }) => s.email === "viewer@example.com");
-    expect((await app.inject({ method: "DELETE", url: `/v1/files/${f.id}/shares/${vShare.id}`, headers: auth(owner.token) })).statusCode).toBe(204);
-    expect((await app.inject({ method: "GET", url: `/v1/files/${f.id}`, headers: auth(viewer.token) })).statusCode).toBe(404);
+describe("no sharing", () => {
+  it("has no share or link routes, and leftover share rows from an older version grant nothing", async () => {
+    const owner = await login("ns-owner@example.com");
+    const other = await login("ns-other@example.com");
+    const f = await createFile(owner.token, "Mine");
+    for (const [m, u] of [["POST", `/v1/files/${f.id}/shares`], ["GET", `/v1/files/${f.id}/shares`], ["PUT", `/v1/files/${f.id}/link`], ["POST", `/v1/files/${f.id}/leave`], ["GET", "/s/abcdefghijklmnopqrstuvwxyz"]] as const) {
+      expect((await app.inject({ method: m, url: u, headers: auth(owner.token), payload: m === "GET" ? undefined : {} })).statusCode, `${m} ${u}`).toBe(404);
+    }
+    // a row left in the old tables (from before sharing was removed) must not open the file
+    await db.query(`INSERT INTO shares (file_id, invited_email, role, created_by) VALUES ($1, $2, 'editor', $3)`, [f.id, "ns-other@example.com", owner.id]);
+    expect((await app.inject({ method: "GET", url: `/v1/files/${f.id}`, headers: auth(other.token) })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/v1/files?view=mine", headers: auth(other.token) })).json().files).toHaveLength(0);
+    expect((await app.inject({ method: "GET", url: "/v1/files?view=shared", headers: auth(other.token) })).statusCode).toBe(400);
   });
 });

@@ -8,11 +8,11 @@ The product name lives in one file, [brand/brand.json](brand/brand.json); icons 
 [brand/logo-icon.svg](brand/logo-icon.svg) with `npm run icons --workspace @ecd/extension`.
 
 A Chrome extension + small backend that give excalidraw.com a free, Google-Drive-style cloud:
-sign in with Google, see all your drawings, open one and keep editing, autosave, share by email.
+sign in with Google, see all your drawings, open one and keep editing, autosave.
 Backend runs on the Oracle Cloud **Always Free** tier. Unaffiliated with Excalidraw.
 
 ```
-apps/api         Fastify + PostgreSQL backend (auth, files, versions, sharing)
+apps/api         Fastify + PostgreSQL backend (auth, files, versions)
 apps/extension   Chrome MV3 extension (button in Excalidraw, side panel, autosave)
 packages/shared  Zod schemas + types shared by both (the API contract)
 deploy/          docker-compose, Caddy (HTTPS), env template
@@ -22,10 +22,10 @@ deploy/          docker-compose, Caddy (HTTPS), env template
 
 | Area | State |
 |---|---|
-| API: Google sign-in (PKCE), rotating refresh tokens, files CRUD, optimistic-concurrency saves, 20 versions + restore, trash, quota, sharing by email | Built, 10 automated tests pass |
-| Extension: Inkdrive button, side panel (sign in, list, search, tabs, **new drawing, upload .excalidraw files (picker or drag-and-drop), download, make a copy, version history**, save, open, rename, star, trash, share, storage meter), autosave, conflict and offline handling, dev sign-in | Built, type-checks and bundles. Not yet run as an installed Chrome extension |
+| API: Google sign-in (PKCE), rotating refresh tokens, files CRUD, optimistic-concurrency saves, 20 versions + restore, trash, quota | Built, 10 automated tests pass |
+| Extension: Inkdrive button, side panel (sign in, list, search, tabs, **new drawing, upload .excalidraw files (picker or drag-and-drop), download, make a copy, version history**, save, open, rename, star, trash, storage meter), autosave, conflict and offline handling, dev sign-in | Built, type-checks and bundles. Not yet run as an installed Chrome extension |
 | Excalidraw integration (`ExcalidrawBridge`) | **Verified** against Excalidraw's source and live excalidraw.com, see [SPIKE.md](SPIKE.md) |
-| Invite emails, link sharing, web viewer, folders UI, thumbnails | Not built yet |
+| Sharing, invite emails, live collaboration | Removed on purpose: every drawing belongs to one person |
 
 ## Sign-in artwork
 
@@ -125,33 +125,23 @@ you can tag things that were only shared with you.
   Theme (Auto / Light / Dark), Take the tour, Privacy and encryption, About, Sign out. To add a setting, add a key to `StoredState`
   (`src/protocol.ts`) and one row in `src/sidepanel/profile.tsx`.
 
-## Folders and sharing (Google-Drive style)
-
-- **Folders** nest to any depth; create from the **+** button, move with **Move to…**, breadcrumb on top. Trashing a folder
-  hides what is inside it; restoring brings it back; deleting it forever deletes the contents.
-- **Share files or folders** with people by email as **Viewer** or **Editor**. Access **flows down**: sharing a folder shares
-  everything inside, and a stronger share on one item upgrades it. The dialog lists who has access, including people who get it
-  from a parent folder (read-only, "Inherited from …").
-- **General access:** *Restricted*, or *Anyone with the link* (Viewer or Editor). The link is `https://<api>/s/<token>`; opening it
-  with the extension installed and signed in adds the item to **Shared with me** and opens it. Turning the link off cuts off everyone
-  who came in through it immediately. Link access requires a Google sign-in; there is no anonymous access.
-- **Ownership:** only owners move, trash, share or star. Things an editor creates inside someone's shared folder belong to that
-  folder's owner, so a folder tree always has one owner. People can **Remove from Shared with me** for anything shared with them.
-- **Not built yet:** invite emails, ownership transfer, comment-only role, a web viewer for people without the extension.
+## Folders (no sharing)
+- Folders nest (up to 30 deep), with breadcrumbs, Move to…, and a Recent / Starred / Trash view.
+- **There is no sharing.** Every drawing and folder belongs to exactly one person; the server answers 404 to anyone else.
+  The old `shares`, `link_shares` and `link_access` tables are still in the database from earlier migrations but nothing reads them.
 
 ## Security notes
 
 - **Encryption.** Traffic is HTTPS only. Every drawing is encrypted at rest with AES-256-GCM using `DATA_KEY`
   (`apps/api/src/crypto.ts`); each blob is bound to its file and revision, so it cannot be copied onto another row,
   and tampering is detected. Database dumps and backups therefore contain no readable drawings.
-  This is **not end-to-end encryption**: the server holds the key so it can show and share drawings. File names,
-  emails and share lists are stored in plain text (needed for search and sharing). Refresh tokens are stored only as hashes.
+  This is **not end-to-end encryption**: the server holds the key so it can show drawings. File names and
+  emails are stored in plain text (needed for search). Refresh tokens are stored only as hashes.
   **Back up `DATA_KEY` separately from the database. Losing it makes every drawing unreadable.** Rotate by moving the
   old key to `DATA_KEY_OLD`. With a real `DATABASE_URL` the server refuses to start without `DATA_KEY`.
   Not covered: the access token and your sign-in state in the browser's extension storage (standard for extensions).
 - Every file route goes through one permission function (`apps/api/src/permissions.ts`); strangers get 404, never 403.
   `api.test.ts` tries every route as a stranger.
-- Shares are tied to the invited **verified Google email**, so a forwarded invite cannot be used by another account.
 - Refresh tokens are stored hashed, rotate on every use, and reuse revokes the whole session family.
 - The extension runs only on excalidraw.com; permissions: `storage`, `identity`, `sidePanel`, `alarms`.
 - Known dependency note: `zod@3` has an advisory about memory use on oversized *constrained* collections. We set no

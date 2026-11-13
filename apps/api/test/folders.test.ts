@@ -57,9 +57,8 @@ describe("folders", () => {
     expect(names(found as any)).toEqual(["Zebra"]);
   });
 
-  it("moves items, refuses loops, and only owners may move", async () => {
+  it("moves items, refuses loops, and only the owner may move", async () => {
     const owner = await login("mv-owner@example.com");
-    const editor = await login("mv-editor@example.com");
     const top = await folder(owner, "Top");
     const sub = await folder(owner, "Sub", top.id);
     const f = await file(owner, "Doc");
@@ -70,97 +69,8 @@ describe("folders", () => {
     expect((await call(owner, "PATCH", `/v1/files/${top.id}`, { parentId: top.id })).status).toBe(400); // into itself
     expect((await call(owner, "PATCH", `/v1/files/${f.id}`, { parentId: null })).status).toBe(200); // back to root
 
-    await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: editor.email, role: "editor" });
     const inTop = await file(owner, "In top", top.id);
-    expect((await call(editor, "PATCH", `/v1/files/${inTop.id}`, { parentId: null })).status).toBe(404); // editors cannot move
-  });
-});
-
-describe("sharing a folder (inherited access, like Google Drive)", () => {
-  it("flows down to everything inside, with the right role", async () => {
-    const owner = await login("sh-owner@example.com", "Pari");
-    const editor = await login("sh-editor@example.com");
-    const viewer = await login("sh-viewer@example.com");
-    const stranger = await login("sh-stranger@example.com");
-    const top = await folder(owner, "Team");
-    const sub = await folder(owner, "Deep", top.id);
-    const doc = await file(owner, "Doc", sub.id);
-    await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: editor.email, role: "editor" });
-    await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: viewer.email, role: "viewer" });
-
-    // both can read, two levels down
-    expect((await call(editor, "GET", `/v1/files/${doc.id}`)).status).toBe(200);
-    expect((await call(viewer, "GET", `/v1/files/${doc.id}`)).status).toBe(200);
-    // editor can save, viewer cannot
-    expect((await call(editor, "PUT", `/v1/files/${doc.id}`, { scene: scene(2) }, { "if-match": "1" })).status).toBe(200);
-    expect((await call(viewer, "PUT", `/v1/files/${doc.id}`, { scene: scene(2) }, { "if-match": "2" })).status).toBe(404);
-    // strangers see nothing
-    expect((await call(stranger, "GET", `/v1/files/${doc.id}`)).status).toBe(404);
-    expect((await call(stranger, "GET", `/v1/files?parent=${top.id}`)).status).toBe(404);
-
-    // listing a folder reports the caller's inherited access
-    const list = await call(viewer, "GET", `/v1/files?parent=${top.id}`);
-    expect(list.body.files[0].access).toBe("viewer");
-    expect((await call(editor, "GET", `/v1/files?parent=${sub.id}`)).body.files[0].access).toBe("editor");
-
-    // "Shared with me" shows the shared folder only, not what is inside it
-    const shared = await call(viewer, "GET", "/v1/files?view=shared");
-    expect(names(shared as any)).toEqual(["Team"]);
-
-    // breadcrumb starts at the shared folder for the invitee
-    const path = await call(viewer, "GET", `/v1/files/${doc.id}/path`);
-    expect(path.body.path.map((p: { name: string }) => p.name)).toEqual(["Team", "Deep", "Doc"]);
-
-    // a stronger direct share on a child upgrades the inherited role
-    await call(owner, "POST", `/v1/files/${doc.id}/shares`, { email: viewer.email, role: "editor" });
-    expect((await call(viewer, "PUT", `/v1/files/${doc.id}`, { scene: scene(3) }, { "if-match": "2" })).status).toBe(200);
-
-    // recent includes files reachable through the shared folder
-    const recent = await call(editor, "GET", "/v1/files?view=recent");
-    expect(names(recent as any)).toContain("Doc");
-  });
-
-  it("new items an editor creates in a shared folder belong to the folder's owner", async () => {
-    const owner = await login("own2@example.com");
-    const editor = await login("ed2@example.com");
-    const top = await folder(owner, "Shared drive");
-    await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: editor.email, role: "editor" });
-    const made = await call(editor, "POST", "/v1/files", { name: "By editor", scene: scene(), parentId: top.id });
-    expect(made.status).toBe(201);
-    expect(made.body.ownerId).toBe(owner.id);
-    // the owner can see and manage it; a viewer cannot create there
-    expect((await call(owner, "GET", `/v1/files/${made.body.id}`)).body.access).toBe("owner");
-    const viewer = await login("vw2@example.com");
-    await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: viewer.email, role: "viewer" });
-    expect((await call(viewer, "POST", "/v1/files", { name: "Nope", scene: scene(), parentId: top.id })).status).toBe(400);
-  });
-
-  it("shows inherited people and changes roles in the share dialog data", async () => {
-    const owner = await login("dlg-owner@example.com", "Pari");
-    const a = await login("dlg-a@example.com");
-    const top = await folder(owner, "Top");
-    const doc = await file(owner, "Doc", top.id);
-    const s = await call(owner, "POST", `/v1/files/${top.id}/shares`, { email: a.email, role: "viewer" });
-
-    const info = (await call(owner, "GET", `/v1/files/${doc.id}/shares`)).body;
-    expect(info.owner).toEqual({ name: "Pari", email: "dlg-owner@example.com" });
-    expect(info.shares).toHaveLength(0);
-    expect(info.inherited).toMatchObject([{ email: a.email, role: "viewer", fromName: "Top" }]);
-    expect(info.link).toEqual({ enabled: false, role: "viewer", token: null });
-
-    expect((await call(owner, "PATCH", `/v1/files/${top.id}/shares/${s.body.id}`, { role: "editor" })).status).toBe(200);
-    expect((await call(a, "PUT", `/v1/files/${doc.id}`, { scene: scene(2) }, { "if-match": "1" })).status).toBe(200);
-  });
-
-  it("lets someone leave what was shared with them", async () => {
-    const owner = await login("lv-owner@example.com");
-    const guest = await login("lv-guest@example.com");
-    const doc = await file(owner, "Leaving");
-    await call(owner, "POST", `/v1/files/${doc.id}/shares`, { email: guest.email, role: "viewer" });
-    expect((await call(guest, "GET", "/v1/files?view=shared")).body.files).toHaveLength(1);
-    expect((await call(guest, "POST", `/v1/files/${doc.id}/leave`)).status).toBe(204);
-    expect((await call(guest, "GET", "/v1/files?view=shared")).body.files).toHaveLength(0);
-    expect((await call(owner, "POST", `/v1/files/${doc.id}/leave`)).status).toBe(400);
+    expect((await call(await login("mv-stranger@example.com"), "PATCH", `/v1/files/${inTop.id}`, { parentId: null })).status).toBe(404); // others cannot move
   });
 });
 
@@ -189,117 +99,5 @@ describe("trash and delete with folders", () => {
     expect((await call(u, "PUT", `/v1/files/${top.id}`, { scene: scene() }, { "if-match": "1" })).status).toBe(400);
     expect((await call(u, "GET", `/v1/files/${top.id}/versions`)).status).toBe(400);
     expect((await call(u, "GET", `/v1/files/${top.id}`)).body.kind).toBe("folder");
-  });
-});
-
-describe("anyone with the link", () => {
-  it("grants access only after a signed-in person redeems the link, and revoking cuts it off", async () => {
-    const owner = await login("lk-owner@example.com");
-    const guest = await login("lk-guest@example.com");
-    const doc = await file(owner, "Linked");
-
-    const on = await call(owner, "PUT", `/v1/files/${doc.id}/link`, { enabled: true, role: "viewer" });
-    expect(on.status).toBe(200);
-    const token = on.body.token as string;
-    expect(token.length).toBeGreaterThan(30);
-
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).status).toBe(404); // knowing the id is not enough
-    expect((await call(guest, "POST", "/v1/links/not-a-real-token-not-a-real-token/redeem")).status).toBe(404);
-
-    const redeemed = await call(guest, "POST", `/v1/links/${token}/redeem`);
-    expect(redeemed.body).toMatchObject({ id: doc.id, name: "Linked", kind: "file", access: "viewer" });
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).status).toBe(200);
-    expect((await call(guest, "PUT", `/v1/files/${doc.id}`, { scene: scene(2) }, { "if-match": "1" })).status).toBe(404);
-    expect(names((await call(guest, "GET", "/v1/files?view=shared")) as any)).toEqual(["Linked"]);
-
-    // the owner sees the same link again, and can upgrade it to editor
-    expect((await call(owner, "GET", `/v1/files/${doc.id}/shares`)).body.link).toEqual({ enabled: true, role: "viewer", token });
-    await call(owner, "PUT", `/v1/files/${doc.id}/link`, { enabled: true, role: "editor" });
-    expect((await call(guest, "PUT", `/v1/files/${doc.id}`, { scene: scene(2) }, { "if-match": "1" })).status).toBe(200);
-
-    // turning it off removes access at once, and turning it on again needs a fresh redeem
-    await call(owner, "PUT", `/v1/files/${doc.id}/link`, { enabled: false });
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).status).toBe(404);
-    expect((await call(guest, "POST", `/v1/links/${token}/redeem`)).status).toBe(404);
-    const again = await call(owner, "PUT", `/v1/files/${doc.id}/link`, { enabled: true });
-    expect(again.body.token).toBe(token);
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).status).toBe(404);
-    expect((await call(guest, "POST", `/v1/links/${token}/redeem`)).status).toBe(200);
-  });
-
-  it("works on folders and flows down to the contents", async () => {
-    const owner = await login("lkf-owner@example.com");
-    const guest = await login("lkf-guest@example.com");
-    const top = await folder(owner, "Public-ish");
-    const doc = await file(owner, "Inside", top.id);
-    const token = (await call(owner, "PUT", `/v1/files/${top.id}/link`, { enabled: true })).body.token as string;
-    expect((await call(guest, "POST", `/v1/links/${token}/redeem`)).body.kind).toBe("folder");
-    expect((await call(guest, "GET", `/v1/files/${doc.id}`)).status).toBe(200);
-  });
-
-  it("only the owner can manage the link, and the token is never stored in the clear", async () => {
-    const owner = await login("lkm-owner@example.com");
-    const editor = await login("lkm-editor@example.com");
-    const doc = await file(owner, "Doc");
-    await call(owner, "POST", `/v1/files/${doc.id}/shares`, { email: editor.email, role: "editor" });
-    expect((await call(editor, "PUT", `/v1/files/${doc.id}/link`, { enabled: true })).status).toBe(404);
-    const token = (await call(owner, "PUT", `/v1/files/${doc.id}/link`, { enabled: true })).body.token as string;
-    const row = (await db.query<{ token_hash: string; token_enc: Uint8Array }>(`SELECT token_hash, token_enc FROM link_shares WHERE file_id = $1`, [doc.id]))[0]!;
-    expect(row.token_hash).not.toContain(token);
-    expect(Buffer.from(row.token_enc).includes(Buffer.from(token))).toBe(false);
-  });
-
-  it("serves a harmless landing page", async () => {
-    const r = await app.inject({ method: "GET", url: "/s/anything-at-all" });
-    expect(r.statusCode).toBe(200);
-    expect(r.headers["content-type"]).toContain("text/html");
-    expect(r.headers["cache-control"]).toBe("no-store");
-    expect(r.body).toContain("Open in Inkdrive");
-  });
-});
-
-describe("invite emails", () => {
-  it("emails once per change, respects notify:false and the daily cap, and never fails the share", async () => {
-    const sent: { to: string; role: string; fileName: string }[] = [];
-    const mailer = { sendInvite: async (i: any) => void sent.push(i) };
-    const db2 = await openMemory();
-    await migrate(db2);
-    const app2 = await buildApp(loadConfig({ JWT_SECRET: "y".repeat(40), DEV_AUTH: "1", INVITES_PER_DAY: "2" }), db2, mailer);
-    const lg = async (email: string) => {
-      const r = await app2.inject({ method: "POST", url: "/v1/auth/dev", payload: { email, name: "Owner <b>x</b>" } });
-      return r.json().accessToken as string;
-    };
-    const t = await lg("owner@x.test");
-    const mk = (name: string) => app2.inject({ method: "POST", url: "/v1/files", headers: auth(t), payload: { name, scene: scene() } }).then((r) => r.json().id as string);
-    const share = (id: string, payload: object) => app2.inject({ method: "POST", url: `/v1/files/${id}/shares`, headers: auth(t), payload });
-    const id = await mk("Plan");
-    const r1 = await share(id, { email: "A@x.test", role: "viewer" });
-    expect(r1.json().emailed).toBe(true);
-    await new Promise((r) => setTimeout(r, 5));
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ to: "a@x.test", role: "viewer", fileName: "Plan" });
-    expect((await share(id, { email: "a@x.test", role: "viewer" })).json().emailed).toBe(false); // identical repeat
-    expect((await share(id, { email: "a@x.test", role: "editor" })).json().emailed).toBe(true); // role changed
-    expect((await share(id, { email: "b@x.test", role: "viewer", notify: false })).json().emailed).toBe(false);
-    const capped = await share(id, { email: "c@x.test", role: "viewer" }); // 3rd email today, cap is 2
-    expect(capped.statusCode).toBe(201);
-    expect(capped.json().emailed).toBe(false);
-    await app2.close();
-  });
-
-  it("escapes names and survives a failing mailer", async () => {
-    const { renderInvite } = await import("../src/mailer.js");
-    const m = renderInvite({ to: "a@x.test", fromName: "<img src=x onerror=1>\nBcc: z", fileName: "<script>", kind: "file", role: "editor" }, "");
-    expect(m.html).not.toContain("<script>");
-    expect(m.html).not.toContain("<img");
-    expect(m.subject).not.toMatch(/[\r\n]/);
-    const db2 = await openMemory();
-    await migrate(db2);
-    const app2 = await buildApp(loadConfig({ JWT_SECRET: "y".repeat(40), DEV_AUTH: "1" }), db2, { sendInvite: async () => Promise.reject(new Error("boom")) });
-    const t = (await app2.inject({ method: "POST", url: "/v1/auth/dev", payload: { email: "o@x.test", name: "o" } })).json().accessToken as string;
-    const id = (await app2.inject({ method: "POST", url: "/v1/files", headers: auth(t), payload: { name: "F", scene: scene() } })).json().id;
-    const r = await app2.inject({ method: "POST", url: `/v1/files/${id}/shares`, headers: auth(t), payload: { email: "z@x.test", role: "viewer" } });
-    expect(r.statusCode).toBe(201);
-    await app2.close();
   });
 });

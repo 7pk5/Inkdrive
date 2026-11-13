@@ -5,10 +5,7 @@ export const API_VERSION = "v1";
 /** Extensions older than this are asked to update (served by GET /v1/meta). */
 export const MIN_EXTENSION_VERSION = "0.1.0";
 
-export const Role = z.enum(["viewer", "editor"]);
-export type Role = z.infer<typeof Role>;
-
-/** What the caller can do with a file. */
+/** Internal: only "owner" is ever granted (there is no sharing). */
 export const Access = z.enum(["owner", "editor", "viewer"]);
 export type Access = z.infer<typeof Access>;
 
@@ -70,8 +67,6 @@ export const FileMeta = z.object({
   revision: z.number().int(),
   size: z.number().int(),
   starred: z.boolean(),
-  access: Access,
-  shared: z.boolean(),
   /** The caller's own tags on this item. */
   tags: z.array(Tag),
   trashed: z.boolean(),
@@ -83,7 +78,7 @@ export type FileMeta = z.infer<typeof FileMeta>;
 export const FileWithScene = FileMeta.extend({ scene: Scene });
 export type FileWithScene = z.infer<typeof FileWithScene>;
 
-export const ListView = z.enum(["mine", "shared", "recent", "starred", "trash"]);
+export const ListView = z.enum(["mine", "recent", "starred", "trash"]);
 export type ListView = z.infer<typeof ListView>;
 
 export const CreateFileBody = z.object({
@@ -122,39 +117,6 @@ export const ConflictError = z.object({
   error: z.literal("conflict"),
   currentRevision: z.number().int(),
 });
-
-export const ShareEntry = z.object({
-  id: z.string().uuid(),
-  email: z.string().email(),
-  role: Role,
-  createdAt: z.string(),
-});
-export type ShareEntry = z.infer<typeof ShareEntry>;
-
-export const AddShareBody = z.object({ email: z.string().email(), role: Role, notify: z.boolean().optional() });
-export type AddShareBody = z.infer<typeof AddShareBody>;
-
-export const UpdateShareBody = z.object({ role: Role });
-export type UpdateShareBody = z.infer<typeof UpdateShareBody>;
-
-/** "Anyone with the link" setting for a file or folder. */
-export const SetLinkBody = z.object({ enabled: z.boolean(), role: Role.optional() });
-export type SetLinkBody = z.infer<typeof SetLinkBody>;
-
-export const LinkInfo = z.object({ enabled: z.boolean(), role: Role, token: z.string().nullable() });
-export type LinkInfo = z.infer<typeof LinkInfo>;
-
-export const InheritedShare = z.object({ id: z.string().uuid(), email: z.string().email(), role: Role, fromId: z.string().uuid(), fromName: z.string() });
-export type InheritedShare = z.infer<typeof InheritedShare>;
-
-/** Everything the share dialog needs in one response. */
-export const SharingInfo = z.object({
-  owner: z.object({ name: z.string(), email: z.string() }),
-  shares: z.array(ShareEntry),
-  inherited: z.array(InheritedShare),
-  link: LinkInfo,
-});
-export type SharingInfo = z.infer<typeof SharingInfo>;
 
 export const PathItem = z.object({ id: z.string().uuid(), name: z.string() });
 export type PathItem = z.infer<typeof PathItem>;

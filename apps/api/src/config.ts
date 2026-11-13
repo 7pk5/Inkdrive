@@ -20,13 +20,6 @@ const Env = z.object({
   /** Previous keys (comma-separated base64) kept only so old data can still be decrypted after rotation. */
   DATA_KEY_OLD: z.string().default(""),
   PER_USER_QUOTA_BYTES: z.coerce.number().default(500 * 1024 * 1024),
-  /** Invite emails (optional). Brevo free plan: 300/day. MAIL_FROM must be a sender verified in Brevo. */
-  BREVO_API_KEY: z.string().default(""),
-  MAIL_FROM: z.string().default(""),
-  /** Where invitees can get the extension (Chrome Web Store link once published). */
-  INSTALL_URL: z.string().default(""),
-  /** Cap on invite emails one user can trigger per day (stops the feature being used to spam). */
-  INVITES_PER_DAY: z.coerce.number().default(30),
   KEEP_VERSIONS: z.coerce.number().default(20),
 });
 

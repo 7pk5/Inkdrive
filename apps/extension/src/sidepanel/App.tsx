@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Scene, type FileMeta, type ListView, type TagWithCount } from "@ecd/shared";
 import { BRAND } from "../brand";
 import type { StoredState, SyncState } from "../protocol";
-import { ConfirmDialog, HistoryDialog, MoveDialog, NameDialog, PrivacyDialog, ShareDialog } from "./dialogs";import { ago, api, bg, CHEVRON, CLOUD, DOTS, ExcalidrawFileIcon, FOLDER, FOLDER_PLUS, Icon, LOCK, Logo, msg, PLUS, safeFileName, stripExt, TAG, UPLOAD } from "./common";
+import { ConfirmDialog, HistoryDialog, MoveDialog, NameDialog, PrivacyDialog } from "./dialogs";import { ago, api, bg, CHEVRON, CLOUD, DOTS, ExcalidrawFileIcon, FOLDER, FOLDER_PLUS, Icon, LOCK, Logo, msg, PLUS, safeFileName, stripExt, TAG, UPLOAD } from "./common";
 import { ProfileMenu } from "./profile";
 import { TagChip, TagDot, TagsDialog, TagsManager } from "./tags";
 import { WelcomeScreen } from "./welcome";
 
 const TABS: { id: ListView; label: string }[] = [
   { id: "mine", label: "My files" },
-  { id: "shared", label: "Shared with me" },
   { id: "recent", label: "Recent" },
   { id: "starred", label: "Starred" },
   { id: "trash", label: "Trash" },
@@ -18,7 +17,7 @@ const TABS: { id: ListView; label: string }[] = [
 function useStored(): StoredState | null {
   const [s, setS] = useState<StoredState | null>(null);
   useEffect(() => {
-    const load = () => chrome.storage.local.get(["auth", "open", "status", "autosave", "hideTopRight", "navTo", "theme"]).then((v) => setS(v as StoredState));
+    const load = () => chrome.storage.local.get(["auth", "open", "status", "autosave", "hideTopRight", "theme"]).then((v) => setS(v as StoredState));
     void load();
     const onChange = (_: unknown, area: string) => area === "local" && void load();
     chrome.storage.onChanged.addListener(onChange);
@@ -158,14 +157,13 @@ function DevSignIn({ onError }: { onError: (m: string) => void }) {
 type Dialog =
   | { kind: "name"; title: string; initial: string; cta: string; onSubmit: (n: string) => Promise<void> }
   | { kind: "confirm"; title: string; body: string; cta: string; onConfirm: () => Promise<void> }
-  | { kind: "share"; file: FileMeta }
   | { kind: "move"; file: FileMeta }
   | { kind: "history"; file: FileMeta }
   | { kind: "tags"; file: FileMeta }
   | null;
 type Notice = { tone: "info" | "error"; text: string; action?: { label: string; run: () => void } } | null;
 type Crumb = { id: string; name: string };
-type FolderInfo = { id: string; name: string; parentId: string | null; access: "owner" | "editor" | "viewer" };
+type FolderInfo = { id: string; name: string; parentId: string | null };
 
 function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { stored: StoredState; onPrivacy: () => void; welcomeOpen: boolean; onWelcomeClose: () => void; tagsRev: number }) {
   const [view, setView] = useState<ListView>("mine");
@@ -188,8 +186,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
   const open = stored.open ?? null;
   const state: SyncState = stored.status?.state ?? "idle";
   const autosaveOn = stored.autosave !== false;
-  /** Inside a folder you can only add things if you are an editor of it. */
-  const canCreate = folderId ? folderInfo?.access !== "viewer" : true;
 
   const load = useCallback(async () => {
     const my = ++seq.current;
@@ -199,7 +195,7 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
       const r = await api<{ files: FileMeta[]; folder?: FolderInfo }>("GET", listPath);
       if (my !== seq.current) return;
       if (r.status === 404 && folderId) {
-        // The folder is gone or no longer shared with us: fall back to the top level.
+        // The folder is gone: fall back to the top level.
         setFolderId(null);
         setNotice({ tone: "info", text: "That folder is no longer available." });
         return;
@@ -244,18 +240,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
       live = false;
     };
   }, [folderId]);
-
-  // A share link to a folder was opened in the browser: jump to it.
-  useEffect(() => {
-    const nav = stored.navTo;
-    if (!nav) return;
-    void chrome.storage.local.remove("navTo");
-    if (Date.now() - nav.at < 60_000) {
-      setView("shared");
-      setQ("");
-      setFolderId(nav.id);
-    }
-  }, [stored.navTo]);
 
   useEffect(() => {
     if (!menuFor && !newMenu) return;
@@ -409,7 +393,7 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
   };
   const duplicate = (f: FileMeta) =>
     run(async () => {
-      const r = await api("POST", "/v1/files", { name: `${f.name} (copy)`.slice(0, 200), scene: await fetchScene(f), parentId: f.access === "owner" ? f.parentId : null });
+      const r = await api("POST", "/v1/files", { name: `${f.name} (copy)`.slice(0, 200), scene: await fetchScene(f), parentId: f.parentId });
       if (r.status !== 201) throw new Error(r.status === 413 ? "Your storage is full" : `Could not copy (${r.status})`);
       setNotice({ tone: "info", text: `Made “${r.body.name}”.` });
     });
@@ -422,14 +406,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
       a.download = `${safeFileName(f.name)}.excalidraw`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-    });
-  const leave = (f: FileMeta) =>
-    run(async () => {
-      const r = await api("POST", `/v1/files/${f.id}/leave`);
-      if (r.status === 409) throw new Error("That comes from a shared folder. Leave the folder instead.");
-      if (r.status !== 204) throw new Error(`Could not remove it (${r.status})`);
-      if (open?.id === f.id) await bg({ type: "file:detach" });
-      setNotice({ tone: "info", text: `Removed “${f.name}” from Shared with me.` });
     });
   const restoreVersion = (f: FileMeta) => async (rev: number) => {
     await run(async () => {
@@ -444,10 +420,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
     const picked = list.filter((f) => /\.(excalidraw|json)$/i.test(f.name) || f.type === "application/json");
     if (picked.length === 0) {
       setNotice({ tone: "error", text: "Choose .excalidraw files (Excalidraw’s Save to… format)." });
-      return;
-    }
-    if (!canCreate) {
-      setNotice({ tone: "error", text: "You have view-only access to this folder." });
       return;
     }
     setBusy(true);
@@ -490,7 +462,7 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
   const isStartScreen = view === "mine" && !q && !folderId && !tagFilter;
   const welcome = (onClose?: () => void) => (
     <WelcomeScreen
-      canCreate={canCreate}
+      canCreate
       onUpload={() => fileInput.current?.click()}
       onNewDrawing={newDrawing}
       onNewFolder={newFolder}
@@ -501,9 +473,8 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
   const emptyText = q
     ? "No drawings match your search."
     : tagFilter ? "Nothing has this tag yet. Tag a drawing from its ⋯ menu."
-    : folderId ? (canCreate ? "This folder is empty. Add a drawing, a folder, or drop .excalidraw files here." : "This folder is empty.")
+    : folderId ? "This folder is empty. Add a drawing, a folder, or drop .excalidraw files here."
     : view === "trash" ? "Trash is empty."
-    : view === "shared" ? "Nothing has been shared with you yet."
     : view === "starred" ? "Star a drawing from its ⋯ menu to find it here."
     : "";
 
@@ -512,10 +483,10 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
       <div className="body">
         <div className="toolbar">
           <input className="input" type="search" placeholder={folderId ? "Search this folder" : "Search your drawings"} aria-label="Search" value={q} onChange={(e) => setQ(e.target.value)} />
-          <button className="tool" disabled={busy || !canCreate} onClick={() => fileInput.current?.click()} title="Upload .excalidraw files" aria-label="Upload .excalidraw files">
+          <button className="tool" disabled={busy} onClick={() => fileInput.current?.click()} title="Upload .excalidraw files" aria-label="Upload .excalidraw files">
             <Icon d={UPLOAD} size={20} />
           </button>
-          <button data-menu-btn className="tool primary" disabled={busy || !canCreate} onClick={() => setNewMenu(!newMenu)} title="New" aria-label="New drawing or folder" aria-haspopup="menu" aria-expanded={newMenu}>
+          <button data-menu-btn className="tool primary" disabled={busy} onClick={() => setNewMenu(!newMenu)} title="New" aria-label="New drawing or folder" aria-haspopup="menu" aria-expanded={newMenu}>
             <Icon d={PLUS} size={22} />
           </button>
           {newMenu && (
@@ -585,7 +556,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
                 {i === crumbs.length - 1 ? <b aria-current="page">{c.name}</b> : <button className="link" onClick={() => setFolderId(c.id)}>{c.name}</button>}
               </span>
             ))}
-            {folderInfo?.access === "viewer" && <span className="muted" style={{ marginLeft: 6 }}>· view only</span>}
           </nav>
         )}
       </div>
@@ -595,7 +565,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
         {files?.length === 0 && (isStartScreen ? welcome() : <div className="muted" style={{ padding: 16 }}>{emptyText}</div>)}
         {welcomeOpen && !isStartScreen && <div className="welcome-cover">{welcome(onWelcomeClose)}</div>}
         {files?.map((f, index) => {
-          const isOwner = f.access === "owner";
           const isFolder = f.kind === "folder";
           return (
             <div key={f.id} style={{ position: "relative" }} role="listitem">
@@ -607,8 +576,7 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
                     <span className="meta" style={{ display: "block" }}>
                       {open?.id === f.id ? "Open now · " : ""}
                       {isFolder ? "Folder · " : ""}
-                      {isOwner ? "You" : `${f.ownerName} · ${f.access === "viewer" ? "Viewer" : "Editor"}`} · {ago(f.updatedAt)}
-                      {f.shared ? " · Shared" : ""}{f.starred ? " · ★" : ""}
+                      {ago(f.updatedAt)}{f.starred ? " · ★" : ""}
                     </span>
                   </span>
                   {/* tags sit to the right of the name and details, not under them */}
@@ -634,16 +602,14 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
                     </>
                   ) : (
                     <>
-                      {f.access !== "viewer" && <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "name", title: "Rename", initial: f.name, cta: "Rename", onSubmit: async (n) => { setDialog(null); await patch(f, { name: n }); } }); }}>Rename</button>}
+                      <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "name", title: "Rename", initial: f.name, cta: "Rename", onSubmit: async (n) => { setDialog(null); await patch(f, { name: n }); } }); }}>Rename</button>
                       <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "tags", file: f }); }}><Icon d={TAG} size={16} /> Tags…</button>
                       {!isFolder && <button role="menuitem" onClick={() => { setMenuFor(null); void duplicate(f); }}>Make a copy</button>}
                       {!isFolder && <button role="menuitem" onClick={() => { setMenuFor(null); void download(f); }}>Download .excalidraw</button>}
                       {!isFolder && <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "history", file: f }); }}>Version history</button>}
-                      {isOwner && <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "share", file: f }); }}>Share…</button>}
-                      {isOwner && <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "move", file: f }); }}>Move to…</button>}
-                      {isOwner && <button role="menuitem" onClick={() => { setMenuFor(null); void patch(f, { starred: !f.starred }); }}>{f.starred ? "Remove star" : "Add star"}</button>}
-                      {isOwner && <button role="menuitem" className="danger" onClick={() => { setMenuFor(null); void patch(f, { trashed: true }); }}>Move to trash</button>}
-                      {!isOwner && view === "shared" && !folderId && !tagFilter && <button role="menuitem" onClick={() => { setMenuFor(null); void leave(f); }}>Remove from Shared with me</button>}
+                      <button role="menuitem" onClick={() => { setMenuFor(null); setDialog({ kind: "move", file: f }); }}>Move to…</button>
+                      <button role="menuitem" onClick={() => { setMenuFor(null); void patch(f, { starred: !f.starred }); }}>{f.starred ? "Remove star" : "Add star"}</button>
+                      <button role="menuitem" className="danger" onClick={() => { setMenuFor(null); void patch(f, { trashed: true }); }}>Move to trash</button>
                     </>
                   )}
                 </div>
@@ -668,7 +634,6 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
 
       {dialog?.kind === "name" && <NameDialog title={dialog.title} initial={dialog.initial} cta={dialog.cta} onSubmit={dialog.onSubmit} onClose={() => setDialog(null)} />}
       {dialog?.kind === "confirm" && <ConfirmDialog title={dialog.title} body={dialog.body} cta={dialog.cta} onConfirm={dialog.onConfirm} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "share" && <ShareDialog file={dialog.file} onClose={() => { setDialog(null); void load(); }} />}
       {dialog?.kind === "move" && (
         <MoveDialog
           item={dialog.file}
@@ -682,7 +647,7 @@ function Drive({ stored, onPrivacy, welcomeOpen, onWelcomeClose, tagsRev }: { st
         />
       )}
       {dialog?.kind === "tags" && <TagsDialog item={dialog.file} onClose={() => setDialog(null)} onSaved={() => { void loadTags(); void load(); }} />}
-      {dialog?.kind === "history" && <HistoryDialog file={dialog.file} canRestore={dialog.file.access !== "viewer"} onClose={() => setDialog(null)} onRestore={restoreVersion(dialog.file)} />}
+      {dialog?.kind === "history" && <HistoryDialog file={dialog.file} canRestore={true} onClose={() => setDialog(null)} onRestore={restoreVersion(dialog.file)} />}
     </div>
   );
 }

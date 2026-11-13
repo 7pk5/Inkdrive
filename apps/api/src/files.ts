@@ -1,9 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import {
-  AddShareBody,
   CreateFileBody,
   CreateFolderBody,
   CreateTagBody,
@@ -12,22 +10,18 @@ import {
   MAX_TAGS_PER_USER,
   PatchFileBody,
   SaveFileBody,
-  SetLinkBody,
   SetTagsBody,
-  UpdateShareBody,
   UpdateTagBody,
   type Access,
   type FileMeta,
   type Scene,
-  type SharingInfo,
   type Tag,
 } from "@ecd/shared";
 import type { Config } from "./config.js";
 import type { DataCrypto } from "./crypto.js";
 import type { Db } from "./db.js";
-import type { Mailer } from "./mailer.js";
 import { HttpError, IdParams, parse } from "./http.js";
-import { accessFor, bestAccess, can, type Action, type AuthUser } from "./permissions.js";
+import { accessFor, can, type Action, type AuthUser } from "./permissions.js";
 
 interface FileRow {
   id: string;
@@ -42,13 +36,10 @@ interface FileRow {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
-  share_role: string | null;
-  link_role: string | null;
-  shared: boolean;
 }
 
-/** `inherited` = the caller's access to the enclosing folder, which flows down to this item. */
-const toMeta = (r: FileRow, u: AuthUser, inherited?: Access | null): FileMeta => ({
+/** Every item belongs to exactly one person: its owner. */
+const toMeta = (r: FileRow): FileMeta => ({
   id: r.id,
   kind: r.kind,
   name: r.name,
@@ -58,8 +49,6 @@ const toMeta = (r: FileRow, u: AuthUser, inherited?: Access | null): FileMeta =>
   revision: r.revision,
   size: r.size,
   starred: r.starred,
-  access: r.owner_id === u.id ? "owner" : (bestAccess(r.share_role, r.link_role, inherited) ?? "viewer"),
-  shared: r.shared,
   tags: [], // filled in per caller by withTags()
   trashed: r.deleted_at !== null,
   createdAt: new Date(r.created_at).toISOString(),
@@ -68,15 +57,9 @@ const toMeta = (r: FileRow, u: AuthUser, inherited?: Access | null): FileMeta =>
 
 const FILE_SELECT = `
   SELECT f.id, f.kind, f.name, f.owner_id, u.name AS owner_name, f.parent_id, f.revision, f.size, f.starred,
-         f.deleted_at, f.created_at, f.updated_at,
-         s.role AS share_role,
-         (SELECT l.role FROM link_shares l JOIN link_access a ON a.file_id = l.file_id
-           WHERE l.file_id = f.id AND l.enabled AND a.user_id = $1) AS link_role,
-         (EXISTS (SELECT 1 FROM shares x WHERE x.file_id = f.id)
-          OR EXISTS (SELECT 1 FROM link_shares y WHERE y.file_id = f.id AND y.enabled)) AS shared
+         f.deleted_at, f.created_at, f.updated_at
     FROM files f
-    JOIN users u ON u.id = f.owner_id
-    LEFT JOIN shares s ON s.file_id = f.id AND s.invited_email = $2`;
+    JOIN users u ON u.id = f.owner_id`;
 
 /** Excludes items that sit inside a trashed folder (they come back when the folder is restored). */
 const NOT_UNDER_TRASH = `AND NOT EXISTS (
@@ -86,17 +69,6 @@ const NOT_UNDER_TRASH = `AND NOT EXISTS (
     SELECT g.parent_id FROM files g JOIN up ON g.id = up.pid
   )
   SELECT 1 FROM up JOIN files p ON p.id = up.pid WHERE p.deleted_at IS NOT NULL)`;
-
-/** Everything the caller can reach through a direct share or a redeemed link, plus all descendants. */
-const SHARED_TREE = `WITH RECURSIVE roots AS (
-    SELECT file_id AS id FROM shares WHERE invited_email = $2
-    UNION
-    SELECT a.file_id FROM link_access a JOIN link_shares l ON l.file_id = a.file_id WHERE a.user_id = $1 AND l.enabled
-  ), tree AS (
-    SELECT id FROM roots
-    UNION
-    SELECT f2.id FROM files f2 JOIN tree t ON f2.parent_id = t.id
-  )`;
 
 const encodeScene = (scene: Scene): { raw: number; gz: Buffer } => {
   const json = JSON.stringify(scene);
@@ -108,16 +80,13 @@ const encodeScene = (scene: Scene): { raw: number; gz: Buffer } => {
 export const MAX_FOLDER_DEPTH = 30;
 export const MAX_ITEMS_PER_USER = 5000;
 
-const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
-
 export interface FileDeps {
   db: Db;
   cfg: Config;
   crypt: DataCrypto;
-  mailer?: Mailer | null;
 }
 
-export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, mailer }: FileDeps) {
+export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt }: FileDeps) {
   /** Each stored blob is bound to its file and revision, so it cannot be moved to another row. */
   const aadFor = (fileId: string, revision: number) => `${fileId}:${revision}`;
   const sealScene = (gz: Buffer, fileId: string, revision: number) => crypt.seal(gz, aadFor(fileId, revision));
@@ -154,14 +123,9 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
     return metas.map((m) => ({ ...m, tags: byFile.get(m.id) ?? [] }));
   };
 
-  /** Rows that may be reachable only through a shared folder: work out the caller's real access for each. */
-  const resolveRows = (rows: FileRow[], u: AuthUser) =>
-    Promise.all(rows.map(async (r) => (r.owner_id === u.id ? toMeta(r, u) : toMeta(r, u, (await accessFor(db, u, r.id))?.access ?? null))));
-
-  const loadMeta = async (u: AuthUser, id: string, access?: Access | null): Promise<FileMeta> => {
-    const rows = await db.query<FileRow>(`${FILE_SELECT} WHERE f.id = $3`, [u.id, u.email, id]);
-    const a = access ?? (await accessFor(db, u, id))?.access ?? null;
-    return (await withTags(u, [toMeta(rows[0]!, u, a)]))[0]!;
+  const loadMeta = async (u: AuthUser, id: string): Promise<FileMeta> => {
+    const rows = await db.query<FileRow>(`${FILE_SELECT} WHERE f.id = $1`, [id]);
+    return (await withTags(u, [toMeta(rows[0]!)]))[0]!;
   };
 
   /** How deep an item sits (1 = top level). Bounded so recursive queries stay cheap. */
@@ -177,7 +141,7 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
     return Number(r[0]?.d ?? 0);
   };
 
-  /** New items inside someone else's shared folder belong to the folder's owner (like a shared drive). */
+  /** Only the owner's own folders can contain new items. */
   const resolveParent = async (u: AuthUser, parentId?: string | null): Promise<{ ownerId: string }> => {
     if (!parentId) return { ownerId: u.id };
     const p = await accessFor(db, u, parentId);
@@ -222,24 +186,24 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
       req.query,
     );
     const u = req.user!;
-    const params: unknown[] = [u.id, u.email];
+    const params: unknown[] = [u.id];
     const search = q.q ? (params.push(`%${q.q.replace(/[\\%_]/g, "\\$&")}%`), `AND f.name ILIKE $${params.length}`) : "";
     const kindFilter = q.kind ? (params.push(q.kind), `AND f.kind = $${params.length}`) : "";
     const byName = `ORDER BY (f.kind = 'folder') DESC, lower(f.name)`;
 
-    // Inside a folder: its children, whoever owns them, with the folder's access flowing down.
+    // Inside a folder: its children.
     if (q.parent) {
       const p = await accessFor(db, u, q.parent);
       if (!p || p.kind !== "folder" || p.trashed || p.hidden) throw new HttpError(404, "not_found");
       params.push(q.parent);
       const rows = await db.query<FileRow>(
-        `${FILE_SELECT} WHERE f.parent_id = $${params.length} AND f.deleted_at IS NULL ${search} ${kindFilter} ${byName} LIMIT 500`,
+        `${FILE_SELECT} WHERE f.owner_id = $1 AND f.parent_id = $${params.length} AND f.deleted_at IS NULL ${search} ${kindFilter} ${byName} LIMIT 500`,
         params,
       );
       const info = await db.query<{ name: string; parent_id: string | null }>(`SELECT name, parent_id FROM files WHERE id = $1`, [q.parent]);
       return {
-        files: await withTags(u, rows.map((r) => toMeta(r, u, p.access))),
-        folder: { id: q.parent, name: info[0]!.name, parentId: info[0]!.parent_id, access: p.access },
+        files: await withTags(u, rows.map((r) => toMeta(r))),
+        folder: { id: q.parent, name: info[0]!.name, parentId: info[0]!.parent_id },
       };
     }
 
@@ -249,16 +213,15 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
       if (!own[0]) throw new HttpError(404, "not_found");
       params.push(q.tag);
       const rows = await db.query<FileRow>(
-        `${SHARED_TREE} ${FILE_SELECT}
-          WHERE f.deleted_at IS NULL AND (f.owner_id = $1 OR f.id IN (SELECT id FROM tree))
+        `${FILE_SELECT}
+          WHERE f.deleted_at IS NULL AND f.owner_id = $1
             AND EXISTS (SELECT 1 FROM file_tags ft WHERE ft.file_id = f.id AND ft.tag_id = $${params.length})
             ${NOT_UNDER_TRASH} ${search} ${kindFilter} ${byName} LIMIT 200`,
         params,
       );
-      return { files: await withTags(u, await resolveRows(rows, u)) };
+      return { files: await withTags(u, rows.map((r) => toMeta(r))) };
     }
 
-    let prefix = "";
     let where: string;
     let order = byName;
     let limit = 200;
@@ -267,14 +230,8 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
         // A search looks through every folder; browsing shows only the top level.
         where = `f.owner_id = $1 AND f.deleted_at IS NULL ${q.q ? NOT_UNDER_TRASH : "AND f.parent_id IS NULL"}`;
         break;
-      case "shared":
-        where = `f.owner_id <> $1 AND f.deleted_at IS NULL AND (s.id IS NOT NULL OR EXISTS (
-                   SELECT 1 FROM link_shares l JOIN link_access a ON a.file_id = l.file_id
-                    WHERE l.file_id = f.id AND l.enabled AND a.user_id = $1))`;
-        break;
       case "recent":
-        prefix = SHARED_TREE;
-        where = `f.kind = 'file' AND f.deleted_at IS NULL AND (f.owner_id = $1 OR f.id IN (SELECT id FROM tree)) ${NOT_UNDER_TRASH}`;
+        where = `f.owner_id = $1 AND f.kind = 'file' AND f.deleted_at IS NULL ${NOT_UNDER_TRASH}`;
         order = `ORDER BY f.updated_at DESC`;
         limit = 20;
         break;
@@ -286,41 +243,20 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
         order = `ORDER BY f.deleted_at DESC`;
         break;
     }
-    let rows = await db.query<FileRow>(`${prefix} ${FILE_SELECT} WHERE ${where} ${search} ${kindFilter} ${order} LIMIT ${limit}`, params);
+    const rows = await db.query<FileRow>(`${FILE_SELECT} WHERE ${where} ${search} ${kindFilter} ${order} LIMIT ${limit}`, params);
 
-    if (q.view === "shared" && rows.length) {
-      // Show only the top of each shared tree (a shared folder, not everything inside it), like Drive.
-      const ids = rows.map((r) => r.id);
-      const ph = ids.map((_, i) => `$${i + 1}`).join(",");
-      const anc = await db.query<{ root: string; anc: string; trashed: boolean }>(
-        `WITH RECURSIVE a AS (
-           SELECT id AS root, parent_id AS cur FROM files WHERE id IN (${ph})
-           UNION ALL
-           SELECT a.root, f.parent_id FROM files f JOIN a ON f.id = a.cur
-         )
-         SELECT a.root, a.cur AS anc, (p.deleted_at IS NOT NULL) AS trashed FROM a JOIN files p ON p.id = a.cur`,
-        ids,
-      );
-      const candidate = new Set(ids);
-      const drop = new Set(anc.filter((x) => candidate.has(x.anc) || x.trashed).map((x) => x.root));
-      rows = rows.filter((r) => !drop.has(r.id));
-    }
-
-    // Recent can include files that are only reachable through a shared folder: resolve each properly.
-    if (q.view === "recent") return { files: await withTags(u, await resolveRows(rows, u)) };
-    return { files: await withTags(u, rows.map((r) => toMeta(r, u))) };
+    return { files: await withTags(u, rows.map((r) => toMeta(r))) };
   });
 
   // ---------- tags (private labels) ----------
-  const TAG_COUNTS = `${SHARED_TREE}
-    SELECT t.id, t.name, t.color,
+  const TAG_COUNTS = `SELECT t.id, t.name, t.color,
            (SELECT count(*) FROM file_tags ft JOIN files f ON f.id = ft.file_id
-             WHERE ft.tag_id = t.id AND f.deleted_at IS NULL AND (f.owner_id = $1 OR f.id IN (SELECT id FROM tree)) ${NOT_UNDER_TRASH}) AS count
+             WHERE ft.tag_id = t.id AND f.deleted_at IS NULL AND f.owner_id = $1 ${NOT_UNDER_TRASH}) AS count
       FROM tags t WHERE t.owner_id = $1 ORDER BY lower(t.name)`;
 
   api.get("/v1/tags", async (req) => {
     const u = req.user!;
-    const rows = await db.query<{ id: string; name: string; color: Tag["color"]; count: string | number }>(TAG_COUNTS, [u.id, u.email]);
+    const rows = await db.query<{ id: string; name: string; color: Tag["color"]; count: string | number }>(TAG_COUNTS, [u.id]);
     return { tags: rows.map((r) => ({ id: r.id, name: r.name, color: r.color, count: Number(r.count) })) };
   });
 
@@ -376,28 +312,22 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
       await t.query(`DELETE FROM file_tags WHERE file_id = $1 AND tag_id IN (SELECT id FROM tags WHERE owner_id = $2)`, [f.id, u.id]);
       for (const tagId of ids) await t.query(`INSERT INTO file_tags (file_id, tag_id) VALUES ($1, $2)`, [f.id, tagId]);
     });
-    return { tags: (await loadMeta(u, f.id, f.access)).tags };
+    return { tags: (await loadMeta(u, f.id)).tags };
   });
 
-  /** Breadcrumb: from the highest folder the caller can see down to this item. */
+  /** Breadcrumb: from the top folder down to this item. */
   api.get("/v1/files/:id/path", async (req) => {
     const f = await requireFile(req, "read");
-    const u = req.user!;
-    const chain = await db.query<{ id: string; name: string; owner_id: string; direct: boolean }>(
+    const chain = await db.query<{ id: string; name: string }>(
       `WITH RECURSIVE chain AS (
-         SELECT id, name, owner_id, parent_id, 0 AS depth FROM files WHERE id = $1
+         SELECT id, name, parent_id, 0 AS depth FROM files WHERE id = $1
          UNION ALL
-         SELECT g.id, g.name, g.owner_id, g.parent_id, c.depth + 1 FROM files g JOIN chain c ON g.id = c.parent_id
+         SELECT g.id, g.name, g.parent_id, c.depth + 1 FROM files g JOIN chain c ON g.id = c.parent_id
        )
-       SELECT c.id, c.name, c.owner_id,
-              (EXISTS (SELECT 1 FROM shares s WHERE s.file_id = c.id AND s.invited_email = $2)
-               OR EXISTS (SELECT 1 FROM link_access a JOIN link_shares l ON l.file_id = a.file_id
-                           WHERE a.file_id = c.id AND a.user_id = $3 AND l.enabled)) AS direct
-         FROM chain c ORDER BY c.depth DESC`,
-      [f.id, u.email.toLowerCase(), u.id],
+       SELECT id, name FROM chain ORDER BY depth DESC`,
+      [f.id],
     );
-    const start = chain.findIndex((c) => c.owner_id === u.id || c.direct);
-    return { path: chain.slice(start < 0 ? 0 : start).map((c) => ({ id: c.id, name: c.name })) };
+    return { path: chain };
   });
 
   // ---------- create ----------
@@ -436,7 +366,7 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
   // ---------- read / save ----------
   api.get("/v1/files/:id", async (req) => {
     const f = await requireFile(req, "read");
-    const meta = await loadMeta(req.user!, f.id, f.access);
+    const meta = await loadMeta(req.user!, f.id);
     if (f.kind === "folder") return meta;
     const v = await db.query<{ scene: Uint8Array }>(`SELECT scene FROM file_versions WHERE file_id = $1 AND revision = $2`, [f.id, meta.revision]);
     if (!v[0]) throw new HttpError(500, "missing_version");
@@ -557,145 +487,4 @@ export function registerFileRoutes(api: FastifyInstance, { db, cfg, crypt, maile
     });
     return { revision: out.revision, updatedAt: new Date(out.updated_at).toISOString() };
   });
-
-  // ---------- sharing (people) ----------
-  api.get("/v1/files/:id/shares", async (req): Promise<SharingInfo> => {
-    const f = await requireFile(req, "manage");
-    const owner = await db.query<{ name: string; email: string }>(`SELECT name, email FROM users WHERE id = $1`, [f.ownerId]);
-    const direct = await db.query<{ id: string; invited_email: string; role: "viewer" | "editor"; created_at: string }>(
-      `SELECT id, invited_email, role, created_at FROM shares WHERE file_id = $1 ORDER BY created_at`,
-      [f.id],
-    );
-    const inherited = await db.query<{ id: string; invited_email: string; role: "viewer" | "editor"; from_id: string; from_name: string }>(
-      `WITH RECURSIVE up AS (
-         SELECT parent_id AS pid FROM files WHERE id = $1
-         UNION ALL
-         SELECT g.parent_id FROM files g JOIN up ON g.id = up.pid
-       )
-       SELECT s.id, s.invited_email, s.role, p.id AS from_id, p.name AS from_name
-         FROM up JOIN files p ON p.id = up.pid JOIN shares s ON s.file_id = p.id ORDER BY s.created_at`,
-      [f.id],
-    );
-    const link = await db.query<{ role: "viewer" | "editor"; enabled: boolean; token_enc: Uint8Array }>(
-      `SELECT role, enabled, token_enc FROM link_shares WHERE file_id = $1`,
-      [f.id],
-    );
-    const l = link[0];
-    return {
-      owner: owner[0]!,
-      shares: direct.map((r) => ({ id: r.id, email: r.invited_email, role: r.role, createdAt: new Date(r.created_at).toISOString() })),
-      inherited: inherited.map((r) => ({ id: r.id, email: r.invited_email, role: r.role, fromId: r.from_id, fromName: r.from_name })),
-      link: {
-        enabled: l?.enabled ?? false,
-        role: l?.role ?? "viewer",
-        token: l?.enabled ? crypt.open(l.token_enc, `link:${f.id}`).toString("utf8") : null,
-      },
-    };
-  });
-
-  api.post("/v1/files/:id/shares", async (req, reply) => {
-    const f = await requireFile(req, "manage");
-    const body = parse(AddShareBody, req.body);
-    const email = body.email.toLowerCase();
-    if (email === req.user!.email.toLowerCase()) throw new HttpError(400, "cannot_share_with_self");
-    const before = await db.query<{ role: string }>(`SELECT role FROM shares WHERE file_id = $1 AND invited_email = $2`, [f.id, email]);
-    const rows = await db.query<{ id: string }>(
-      `INSERT INTO shares (file_id, invited_email, role, created_by) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (file_id, invited_email) DO UPDATE SET role = EXCLUDED.role RETURNING id`,
-      [f.id, email, body.role, req.user!.id],
-    );
-    await audit(req.user!.id, "share.add", `${f.id}:${email}:${body.role}`);
-    // Email only when something changed for them, never on a repeated identical add; capped per user per day.
-    let emailed = false;
-    if (mailer && body.notify !== false && before[0]?.role !== body.role) {
-      const sent = await db.query<{ n: string }>(
-        `SELECT count(*)::text AS n FROM audit_log WHERE user_id = $1 AND action = 'invite.email' AND at > now() - interval '1 day'`,
-        [req.user!.id],
-      );
-      if (Number(sent[0]?.n ?? 0) < cfg.INVITES_PER_DAY) {
-        const meta = await db.query<{ name: string; kind: "file" | "folder" }>(`SELECT name, kind FROM files WHERE id = $1`, [f.id]);
-        await audit(req.user!.id, "invite.email", `${f.id}:${email}`);
-        emailed = true;
-        void mailer
-          .sendInvite({ to: email, fromName: req.user!.name, fileName: meta[0]?.name ?? "", kind: meta[0]?.kind ?? "file", role: body.role })
-          .catch((e) => api.log.error({ err: String(e) }, "invite email failed"));
-      }
-    }
-    return reply.status(201).send({ id: rows[0]!.id, email, role: body.role, emailed });
-  });
-
-  api.patch("/v1/files/:id/shares/:shareId", async (req) => {
-    const f = await requireFile(req, "manage");
-    const { shareId } = parse(z.object({ shareId: z.string().uuid() }), req.params);
-    const body = parse(UpdateShareBody, req.body);
-    const r = await db.query<{ id: string }>(`UPDATE shares SET role = $3 WHERE id = $1 AND file_id = $2 RETURNING id`, [shareId, f.id, body.role]);
-    if (!r[0]) throw new HttpError(404, "not_found");
-    await audit(req.user!.id, "share.role", `${f.id}:${shareId}:${body.role}`);
-    return { id: shareId, role: body.role };
-  });
-
-  api.delete("/v1/files/:id/shares/:shareId", async (req, reply) => {
-    const f = await requireFile(req, "manage");
-    const { shareId } = parse(z.object({ shareId: z.string().uuid() }), req.params);
-    await db.query(`DELETE FROM shares WHERE id = $1 AND file_id = $2`, [shareId, f.id]);
-    await audit(req.user!.id, "share.remove", `${f.id}:${shareId}`);
-    return reply.status(204).send();
-  });
-
-  /** Remove something that was shared with you from your own "Shared with me". */
-  api.post("/v1/files/:id/leave", async (req, reply) => {
-    const f = await requireFile(req, "read");
-    const u = req.user!;
-    if (f.access === "owner") throw new HttpError(400, "owner_cannot_leave");
-    const a = await db.query(`DELETE FROM shares WHERE file_id = $1 AND invited_email = $2 RETURNING id`, [f.id, u.email.toLowerCase()]);
-    const b = await db.query(`DELETE FROM link_access WHERE file_id = $1 AND user_id = $2 RETURNING file_id`, [f.id, u.id]);
-    // Access that comes from a shared parent folder cannot be dropped here: leave that folder instead.
-    if (a.length === 0 && b.length === 0) throw new HttpError(409, "access_inherited");
-    await audit(u.id, "share.leave", f.id);
-    return reply.status(204).send();
-  });
-
-  // ---------- sharing (anyone with the link) ----------
-  api.put("/v1/files/:id/link", async (req) => {
-    const f = await requireFile(req, "manage");
-    const body = parse(SetLinkBody, req.body);
-    const existing = await db.query<{ role: "viewer" | "editor"; token_enc: Uint8Array }>(`SELECT role, token_enc FROM link_shares WHERE file_id = $1`, [f.id]);
-    let token: string | null = null;
-    let role: "viewer" | "editor" = body.role ?? existing[0]?.role ?? "viewer";
-    if (!existing[0]) {
-      if (!body.enabled) return { enabled: false, role, token: null };
-      token = randomBytes(32).toString("base64url");
-      await db.query(
-        `INSERT INTO link_shares (file_id, token_hash, token_enc, role, enabled, created_by) VALUES ($1, $2, $3, $4, true, $5)`,
-        [f.id, sha256(token), crypt.seal(Buffer.from(token), `link:${f.id}`), role, req.user!.id],
-      );
-    } else {
-      await db.query(`UPDATE link_shares SET enabled = $2, role = $3 WHERE file_id = $1`, [f.id, body.enabled, role]);
-      if (body.enabled) token = crypt.open(existing[0].token_enc, `link:${f.id}`).toString("utf8");
-    }
-    // Turning the link off cuts off everyone who came in through it; they must reopen the link if it is turned back on.
-    if (!body.enabled) await db.query(`DELETE FROM link_access WHERE file_id = $1`, [f.id]);
-    role = body.role ?? role;
-    await audit(req.user!.id, body.enabled ? "link.on" : "link.off", `${f.id}:${role}`);
-    return { enabled: body.enabled, role, token };
-  });
-
-  /** A signed-in person opened a share link: remember it so the item shows up in "Shared with me". */
-  api.post(
-    "/v1/links/:token/redeem",
-    { config: { rateLimit: { max: process.env.NODE_ENV === "test" ? 100000 : 30, timeWindow: "1 minute" } } },
-    async (req) => {
-      const { token } = parse(z.object({ token: z.string().min(20).max(100) }), req.params);
-      const u = req.user!;
-      const l = await db.query<{ file_id: string }>(`SELECT file_id FROM link_shares WHERE token_hash = $1 AND enabled`, [sha256(token)]);
-      if (!l[0]) throw new HttpError(404, "not_found");
-      const fileId = l[0].file_id;
-      await db.query(`INSERT INTO link_access (user_id, file_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [u.id, fileId]);
-      const a = await accessFor(db, u, fileId);
-      if (!a || a.hidden || (a.trashed && a.access !== "owner")) throw new HttpError(404, "not_found");
-      const meta = await db.query<{ name: string }>(`SELECT name FROM files WHERE id = $1`, [fileId]);
-      await audit(u.id, "link.redeem", fileId);
-      return { id: fileId, name: meta[0]!.name, kind: a.kind, access: a.access };
-    },
-  );
 }

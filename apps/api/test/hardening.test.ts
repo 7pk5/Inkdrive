@@ -77,21 +77,6 @@ describe("limits", () => {
   });
 });
 
-describe("leaving shared items", () => {
-  it("says so when access comes from a shared folder instead of pretending to remove it", async () => {
-    const owner = await login("lvo@example.com");
-    const guest = await login("lvg@example.com");
-    const top = (await call(owner, "POST", "/v1/folders", { name: "Top" })).body.id as string;
-    const doc = (await call(owner, "POST", "/v1/files", { name: "Doc", scene: scene(), parentId: top })).body.id as string;
-    await call(owner, "POST", `/v1/files/${top}/shares`, { email: guest.email, role: "viewer" });
-    const r = await call(guest, "POST", `/v1/files/${doc}/leave`);
-    expect(r.status).toBe(409);
-    expect(r.body.error).toBe("access_inherited");
-    expect((await call(guest, "POST", `/v1/files/${top}/leave`)).status).toBe(204); // leaving the folder works
-    expect((await call(guest, "GET", `/v1/files/${doc}`)).status).toBe(404);
-  });
-});
-
 describe("maintenance", () => {
   it("removes old sessions and audit rows but keeps recent ones", async () => {
     const u = await login("mt@example.com");

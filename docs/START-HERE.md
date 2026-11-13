@@ -170,7 +170,7 @@ Dashboard, **Add new item**, upload the zip. Open the item: the store shows its 
    then `docker compose up -d`.
 
 ### 9.5 Fill in the listing (Store listing tab)
-- **Name**: `Inkdrive for Excalidraw`. **Summary** (max 132 characters): `Your Excalidraw drawings, saved free in the cloud. Folders, sharing, tags, autosave and encryption.`
+- **Name**: `Inkdrive for Excalidraw`. **Summary** (max 132 characters): `Your Excalidraw drawings, saved free in the cloud. Folders, tags, autosave and encryption.`
 - **Description**: what it does, how to sign in, that drawings are encrypted at rest, and that you need a Google account.
 - **Category**: Productivity. **Language**: English.
 - **Icon**: 128x128 is included. **Screenshots**: at least one, 1280x800 (or 640x400), up to five. Take them of the panel next to a real drawing.
@@ -178,13 +178,13 @@ Dashboard, **Add new item**, upload the zip. Open the item: the store shows its 
 - If you want, I can generate the screenshots and the promo tile from the real app.
 
 ### 9.6 Privacy tab (the part reviewers read closely)
-- **Single purpose**: `Save, organise and share Excalidraw drawings in the user's own cloud storage while using excalidraw.com.`
+- **Single purpose**: `Save and organise Excalidraw drawings in the user's own cloud storage while using excalidraw.com.`
 - **Permission justifications** (paste these):
   | Permission | Why |
   |---|---|
   | `storage` | Keeps the signed-in session and the user's settings (autosave, theme) in the browser. |
   | `identity` | Runs Google sign-in so the user can access their own drawings. |
-  | `sidePanel` | Shows the file list and sharing controls next to the canvas. |
+  | `sidePanel` | Shows the file list and controls next to the canvas. |
   | `alarms` | Retries a save once a minute after a network failure so no work is lost. |
   | Host `https://excalidraw.com/*` | Reads the drawing on the canvas to save it, and loads a saved drawing back onto the canvas. |
   | Host `https://<your-domain>/*` | Talks to the Inkdrive server that stores the user's drawings. |
@@ -232,11 +232,11 @@ Updates are reviewed again but are usually faster. Users get them automatically.
 ## Privacy policy: starting text
 > **Inkdrive privacy policy.** Last updated: <date>.
 >
-> **What we collect.** When you sign in with Google we receive your name, email address and profile picture. We store the drawings you save, their names, folders, tags, version history and sharing settings, and technical logs of sign-ins and sharing actions.
+> **What we collect.** When you sign in with Google we receive your name, email address and profile picture. We store the drawings you save, their names, folders, tags, and version history, and technical logs of sign-ins.
 >
-> **What we do with it.** Only to run Inkdrive: sign you in, store and show your drawings, and let you share them with the people you choose. We do not sell your data, show ads, or use it for anything else. We do not use analytics or tracking.
+> **What we do with it.** Only to run Inkdrive: sign you in, store and show your drawings. We do not sell your data, show ads, or use it for anything else. We do not use analytics or tracking.
 >
-> **Who can see your drawings.** You, and people you share them with (by email or link). Our server decrypts drawings to show them to those people.
+> **Who can see your drawings.** Only you. Our server decrypts drawings to show them to you.
 >
 > **Security.** All traffic uses HTTPS. Drawings are stored encrypted (AES-256-GCM). Sign-in tokens are stored as hashes. This is not end-to-end encryption: the server can read drawings in order to display and share them.
 >
