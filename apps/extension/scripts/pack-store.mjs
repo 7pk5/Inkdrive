@@ -21,6 +21,6 @@ if (manifest.key) throw new Error("the store package must not contain a pinned k
 const out = `inkdrive-${manifest.version}.zip`;
 rmSync(out, { force: true });
 // manifest.json must sit at the TOP of the zip (not inside a folder). Source maps are left out.
-execFileSync("zip", ["-qr", `../${out}`, ".", "-x", "*.map"], { cwd: "dist" });
+execFileSync("zip", ["-qrD", `../${out}`, ".", "-x", "*.map"], { cwd: "dist" });
 const kb = Math.round(statSync(out).size / 1024);
 console.log(`\nReady: apps/extension/${out} (${kb} KB). Upload this file in the Chrome Web Store dashboard.`);

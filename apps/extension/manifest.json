@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Inkdrive",
   "description": "Save your excalidraw.com drawings to your own private cloud, with autosave, folders and tags.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minimum_chrome_version": "120",
   "permissions": ["storage", "identity", "sidePanel", "alarms"],
   "host_permissions": [],
