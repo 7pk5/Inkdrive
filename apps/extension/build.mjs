@@ -1,7 +1,7 @@
 // Bundles every extension entry with esbuild and copies static files into dist/.
 // API_URL=https://api.example.com node build.mjs
 import { build, context } from "esbuild";
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 const API_URL = (process.env.API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const watch = process.argv.includes("--watch");
@@ -14,6 +14,7 @@ if (DEV_LOGIN && !["localhost", "127.0.0.1", "[::1]"].includes(apiHost)) {
   throw new Error(`DEV_LOGIN=1 is only allowed with a localhost API_URL (got ${API_URL})`);
 }
 
+await rm("dist", { recursive: true, force: true }); // never leave files from an older build behind
 await mkdir("dist", { recursive: true });
 
 const manifest = JSON.parse(await readFile("manifest.json", "utf8"));
