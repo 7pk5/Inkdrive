@@ -22,7 +22,7 @@ h2{font:500 22px/28px Georgia,"Times New Roman",serif;margin:32px 0 6px}p,li{col
   const privacy = page(
     "Inkdrive privacy policy",
     `<h1>Privacy policy</h1><small>Last updated ${updated}</small>
-<h2>What we collect</h2><p>When you sign in with Google we receive your name, email address and profile picture. We store the drawings you save (including their images), their names, folders, tags and version history, plus technical logs of sign-ins and requests.</p>
+<h2>What we collect</h2><p>When you sign in with Google we receive your name, email address and profile picture. We store the drawings you save (including their images), their names, folders, tags and version history, plus technical server logs of sign-ins and requests, which include your IP address and the time of each request.</p>
 <h2>What we do with it</h2><p>Only to run Inkdrive: sign you in, store your drawings and show them back to you. We do not sell your data, show ads, share it with anyone, or use analytics or tracking.</p>
 <h2>Who can see your drawings</h2><p>Only you. Nothing is shared with other users. Drawings are encrypted on our server's storage and in backups. This is not end-to-end encryption: the server must be able to decrypt a drawing to show it to you, so the person who runs the server could technically read stored drawings.</p>
 <h2>Security</h2><p>All traffic uses HTTPS. Sign-in tokens are stored only as hashes. Each account can reach only its own items.</p>
