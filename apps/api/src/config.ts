@@ -20,6 +20,8 @@ const Env = z.object({
   /** Previous keys (comma-separated base64) kept only so old data can still be decrypted after rotation. */
   DATA_KEY_OLD: z.string().default(""),
   PER_USER_QUOTA_BYTES: z.coerce.number().default(500 * 1024 * 1024),
+  /** Shown on the public privacy page as the contact for data deletion requests. */
+  CONTACT_EMAIL: z.string().default(""),
   KEEP_VERSIONS: z.coerce.number().default(20),
 });
 

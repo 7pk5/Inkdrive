@@ -47,6 +47,7 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?set GOOGLE_CLIENT_SECRET}
       ALLOWED_REDIRECT_URIS: ${ALLOWED_REDIRECT_URIS:?set ALLOWED_REDIRECT_URIS}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-}
       DEV_AUTH: "0"
     networks: [internal, web] # internal: the database; web: Caddy in front, Google for sign-in checks
     read_only: true

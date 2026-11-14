@@ -10,6 +10,7 @@ import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import { registerFileRoutes } from "./files.js";
 import { HttpError, parse } from "./http.js";
+import { registerPublicPages } from "./privacy.js";
 import type { AuthUser } from "./permissions.js";
 
 declare module "fastify" {
@@ -126,6 +127,8 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
 
     registerFileRoutes(api, { db, cfg, crypt });
   });
+
+  registerPublicPages(app, cfg.CONTACT_EMAIL);
 
   return app;
 }

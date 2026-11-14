@@ -170,7 +170,7 @@ Dashboard, **Add new item**, upload the zip. Open the item: the store shows its 
    then `docker compose up -d`.
 
 ### 9.5 Fill in the listing (Store listing tab)
-- **Name**: `Inkdrive for Excalidraw`. **Summary** (max 132 characters): `Your Excalidraw drawings, saved free in the cloud. Folders, tags, autosave and encryption.`
+- **Name**: `Inkdrive`. **Summary** (max 132 characters): `Save your excalidraw.com drawings to your own private cloud, with autosave, folders and tags.`
 - **Description**: what it does, how to sign in, that drawings are encrypted at rest, and that you need a Google account.
 - **Category**: Productivity. **Language**: English.
 - **Icon**: 128x128 is included. **Screenshots**: at least one, 1280x800 (or 640x400), up to five. Take them of the panel next to a real drawing.
@@ -191,7 +191,7 @@ Dashboard, **Add new item**, upload the zip. Open the item: the store shows its 
 - **Remote code**: **No**. (Everything is bundled in the package.)
 - **Data usage**: tick **Personally identifiable information** (name and email from Google), **Authentication information** (sign-in tokens), and
   **Website content** (the drawing read from excalidraw.com). Then tick all three certifications: not sold, not used for unrelated purposes, not used for credit decisions.
-- **Privacy policy URL** (required because you handle personal data): a public page, for example on GitHub Pages or your domain. A starting text is at the end of this guide.
+- **Privacy policy URL**: `https://<your-domain>/privacy` (your server serves it; set `CONTACT_EMAIL=` in `deploy/.env` first so it shows a contact). Use the same URL as the "Application home page" (`https://<your-domain>/`) and privacy link on Google's OAuth consent screen.
   Have it reviewed; it is a template, not legal advice.
 
 ### 9.7 Distribution

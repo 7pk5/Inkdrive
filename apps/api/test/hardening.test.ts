@@ -94,3 +94,21 @@ describe("maintenance", () => {
     expect((await call(u, "GET", "/v1/me")).status).toBe(200); // a live login is untouched
   });
 });
+
+describe("public pages", () => {
+  it("serves a home page and a privacy policy without sign-in, with a strict CSP and an escaped contact", async () => {
+    const d = await openMemory();
+    await migrate(d);
+    const a = await buildApp(loadConfig({ JWT_SECRET: "y".repeat(40), DEV_AUTH: "1", CONTACT_EMAIL: 'a"<b>@x.test' }), d);
+    for (const url of ["/", "/privacy"]) {
+      const r = await a.inject({ method: "GET", url });
+      expect(r.statusCode).toBe(200);
+      expect(r.headers["content-type"]).toContain("text/html");
+      expect(r.headers["content-security-policy"]).toContain("default-src 'none'");
+    }
+    const body = (await a.inject({ method: "GET", url: "/privacy" })).body;
+    expect(body).toContain("Privacy policy");
+    expect(body).not.toContain("<b>@x.test");
+    await a.close();
+  });
+});
